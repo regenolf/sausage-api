@@ -1,0 +1,16 @@
+services:
+  postgres:
+    image: postgres:17
+    container_name: sausage-postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: sausage
+      POSTGRES_USER: sausage
+      POSTGRES_PASSWORD: sausage
+    ports:
+      - "5432:5432"
+    volumes:
+      - sausage-pg-data:/var/lib/postgresql/data
+
+volumes:
+  sausage-pg-data:
