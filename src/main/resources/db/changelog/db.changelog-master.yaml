@@ -1,26 +1,19 @@
 databaseChangeLog:
-  - changeSet:
-      id: 001-create-example-table
-      author: rowert
-      changes:
-        - createTable:
-            tableName: example
-            columns:
-              - column:
-                  name: id
-                  type: BIGINT
-                  autoIncrement: true
-                  constraints:
-                    primaryKey: true
-                    nullable: false
-              - column:
-                  name: name
-                  type: VARCHAR(255)
-                  constraints:
-                    nullable: false
-              - column:
-                  name: created_at
-                  type: TIMESTAMP
-                  defaultValueComputed: CURRENT_TIMESTAMP
-                  constraints:
-                    nullable: false
+  - include:
+      file: db/changelog/changes/001-create-categories.sql
+      relativeToChangelogFile: false
+  - include:
+      file: db/changelog/changes/002-create-users.sql
+      relativeToChangelogFile: false
+  - include:
+      file: db/changelog/changes/003-create-spots.sql
+      relativeToChangelogFile: false
+  - include:
+      file: db/changelog/changes/004-create-ratings.sql
+      relativeToChangelogFile: false
+  - include:
+      file: db/changelog/changes/005-create-comments.sql
+      relativeToChangelogFile: false
+  - include:
+      file: db/changelog/changes/006-seed-categories.sql
+      relativeToChangelogFile: false
