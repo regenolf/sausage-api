@@ -511,6 +511,14 @@ class SpotApiTests {
 		mvc.perform(get(location))
 				.andExpect(status().isNotFound());
 
+		// Der Spot-Ersteller darf auch fremde Fotos an seinem Spot löschen
+		String fremd = mvc.perform(multipart("/api/spots/" + spotId + "/photos").with(httpBasic(other, PASSWORD))
+						.file(new MockMultipartFile("file", "bild.png", "image/png", png)))
+				.andExpect(status().isCreated())
+				.andReturn().getResponse().getHeader("Location");
+		mvc.perform(delete(fremd).with(httpBasic(owner, PASSWORD)))
+				.andExpect(status().isNoContent());
+
 		// Fotos verschwinden mit dem Spot
 		mvc.perform(multipart("/api/spots/" + spotId + "/photos").with(httpBasic(other, PASSWORD))
 						.file(new MockMultipartFile("file", "bild.png", "image/png", png)))

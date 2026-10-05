@@ -36,8 +36,8 @@ docker compose --profile app up --build   # API auf http://localhost:8080
 
 API-Doku (Swagger UI): http://localhost:8080/swagger-ui.html
 
-Läuft die API hinter einem Reverse-Proxy, `server.forward-headers-strategy=native` setzen, damit die
-Begrenzungen die echte Client-IP sehen.
+Hinter einem Reverse-Proxy im privaten Netz (z. B. dem nginx der sausage-app) übernimmt die API die echte
+Client-IP aus `X-Forwarded-For` (`server.forward-headers-strategy=native`), damit die Begrenzungen pro Nutzer greifen.
 
 Health-Checks: `/actuator/health`, `/actuator/health/liveness`, `/actuator/health/readiness`.
 Die GitHub-Actions-CI (`.github/workflows/ci.yml`) führt `./mvnw verify` aus.
@@ -83,8 +83,8 @@ Passwortänderung bis zum Ablauf.
 | `DELETE` | `/api/spots/{id}/ratings/me` | Eigene Bewertung zurücknehmen 🔒 |
 | `GET` | `/api/spots/{id}/photos` | Fotos eines Spots (Metadaten mit `url`) |
 | `GET` | `/api/spots/{id}/photos/{photoId}` | Das Bild selbst |
-| `POST` | `/api/spots/{id}/photos` | Foto hochladen (multipart, Feld `file`, JPEG/PNG/WebP, max. 5 MB, max. 20 je Spot; EXIF/GPS-Metadaten werden entfernt) 🔒 |
-| `DELETE` | `/api/spots/{id}/photos/{photoId}` | Foto löschen 🔒 (Hochladender oder Admin) |
+| `POST` | `/api/spots/{id}/photos` | Foto hochladen (multipart, Feld `file`, JPEG/PNG/WebP, max. 10 MB, max. 20 je Spot; EXIF/GPS-Metadaten werden entfernt) 🔒 |
+| `DELETE` | `/api/spots/{id}/photos/{photoId}` | Foto löschen 🔒 (Hochladender, Ersteller des Spots oder Admin) |
 | `GET` | `/api/spots/{id}/comments` | Kommentare (neueste zuerst, mit Benutzername) |
 | `POST` | `/api/spots/{id}/comments` | Kommentieren 🔒 |
 | `DELETE` | `/api/spots/{id}/comments/{commentId}` | Kommentar löschen 🔒 (Autor oder Admin) |

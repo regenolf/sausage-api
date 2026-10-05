@@ -30,7 +30,7 @@ class ApiExceptionHandler {
 
 	@ExceptionHandler(MaxUploadSizeExceededException.class)
 	ProblemDetail handleTooLarge(MaxUploadSizeExceededException ex) {
-		return ProblemDetail.forStatusAndDetail(HttpStatus.CONTENT_TOO_LARGE, "Die Datei ist zu groß (max. 5 MB)");
+		return ProblemDetail.forStatusAndDetail(HttpStatus.CONTENT_TOO_LARGE, "Die Datei ist zu groß (max. 10 MB)");
 	}
 
 	@ExceptionHandler(MethodArgumentNotValidException.class)

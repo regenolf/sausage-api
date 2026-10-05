@@ -96,8 +96,14 @@ class PhotoController {
 	ResponseEntity<Void> delete(@PathVariable long spotId, @PathVariable long photoId, Authentication auth) {
 		long uploaderId = photos.findUploader(spotId, photoId).orElseThrow(() -> photoNotFound(photoId));
 		boolean admin = auth.getAuthorities().stream().anyMatch(a -> "ROLE_ADMIN".equals(a.getAuthority()));
-		if (!admin && uploaderId != currentUserId(auth)) {
-			throw new ResponseStatusException(HttpStatus.FORBIDDEN, "Nur eigene Fotos dürfen gelöscht werden");
+		if (!admin) {
+			// Löschen dürfen der Hochladende und der Ersteller des Spots
+			long userId = currentUserId(auth);
+			long spotOwnerId = spots.findSpotOwner(spotId).orElse(SpotRepository.NO_OWNER);
+			if (userId != uploaderId && userId != spotOwnerId) {
+				throw new ResponseStatusException(HttpStatus.FORBIDDEN,
+						"Nur eigene Fotos oder Fotos am eigenen Spot dürfen gelöscht werden");
+			}
 		}
 		photos.delete(photoId);
 		return ResponseEntity.noContent().build();
