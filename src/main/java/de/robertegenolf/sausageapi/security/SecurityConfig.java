@@ -36,6 +36,7 @@ class SecurityConfig {
 						.requestMatchers(HttpMethod.GET, "/api/users/me", "/api/users/me/**", "/api/spots/*/ratings/me").authenticated()
 						.requestMatchers(HttpMethod.GET, "/api/**").permitAll()
 						.requestMatchers("/actuator/health/**", "/error").permitAll()
+						.requestMatchers(HttpMethod.GET, "/v3/api-docs/**", "/swagger-ui.html", "/swagger-ui/**").permitAll()
 						.anyRequest().authenticated())
 				.httpBasic(basic -> {
 				});

@@ -24,6 +24,8 @@ docker compose --profile app up --build   # API auf http://localhost:8080
 | `DB_USERNAME` / `DB_PASSWORD` | `sausage` / `sausage` |
 | `CORS_ALLOWED_ORIGINS` | `http://localhost:3000,http://localhost:5173` |
 
+API-Doku (Swagger UI): http://localhost:8080/swagger-ui.html
+
 Health-Checks: `/actuator/health`, `/actuator/health/liveness`, `/actuator/health/readiness`.
 Die GitHub-Actions-CI (`.github/workflows/ci.yml`) startet Postgres als Service und führt `./mvnw verify` aus.
 
