@@ -4,10 +4,13 @@ import de.robertegenolf.sausageapi.security.LoginThrottle;
 import de.robertegenolf.sausageapi.security.TokenService;
 import jakarta.servlet.http.HttpServletRequest;
 import jakarta.validation.Valid;
+import jakarta.validation.constraints.AssertTrue;
 import jakarta.validation.constraints.Email;
 import jakarta.validation.constraints.NotBlank;
+import jakarta.validation.constraints.NotNull;
 import jakarta.validation.constraints.Pattern;
 import jakarta.validation.constraints.Size;
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.dao.DuplicateKeyException;
 import org.springframework.http.ContentDisposition;
 import org.springframework.http.HttpHeaders;
@@ -36,7 +39,10 @@ class UserController {
 			@NotBlank @Size(min = 3, max = 50) @Pattern(regexp = UserRepository.USERNAME_PATTERN,
 					message = UserRepository.USERNAME_MESSAGE) String username,
 			@NotBlank @Email @Size(max = 255) String email,
-			@NotBlank @Size(min = 8, max = 100) String password) {
+			@NotBlank @Size(min = 8, max = 100) String password,
+			/** Nutzungsbedingungen akzeptiert und Mindestalter (16) bestätigt. */
+			@NotNull(message = UserRepository.TERMS_MESSAGE) @AssertTrue(message = UserRepository.TERMS_MESSAGE)
+			Boolean acceptTerms) {
 	}
 
 	public record RegisteredUser(long id, String username) {
@@ -55,14 +61,16 @@ class UserController {
 	private final PasswordEncoder passwordEncoder;
 	private final LoginThrottle throttle;
 	private final TokenService tokens;
+	private final String termsVersion;
 
 	UserController(UserRepository repository, UserExportRepository exports, PasswordEncoder passwordEncoder,
-			LoginThrottle throttle, TokenService tokens) {
+			LoginThrottle throttle, TokenService tokens, @Value("${app.terms.version}") String termsVersion) {
 		this.repository = repository;
 		this.exports = exports;
 		this.passwordEncoder = passwordEncoder;
 		this.throttle = throttle;
 		this.tokens = tokens;
+		this.termsVersion = termsVersion;
 	}
 
 	@PostMapping
@@ -73,7 +81,8 @@ class UserController {
 			throw new ResponseStatusException(HttpStatus.CONFLICT, "Dieser Benutzername ist reserviert");
 		}
 		try {
-			long id = repository.create(username, request.email().trim(), passwordEncoder.encode(request.password()));
+			long id = repository.create(username, request.email().trim(), passwordEncoder.encode(request.password()),
+					termsVersion);
 			return ResponseEntity.created(URI.create("/api/users/" + id)).body(new RegisteredUser(id, username));
 		}
 		catch (DuplicateKeyException ex) {
@@ -83,8 +92,17 @@ class UserController {
 
 	@GetMapping("/me")
 	UserRepository.UserProfile me(Authentication auth) {
-		return repository.findProfile(auth.getName())
+		return repository.findProfile(auth.getName(), termsVersion)
 				.orElseThrow(() -> new ResponseStatusException(HttpStatus.UNAUTHORIZED));
+	}
+
+	/** Akzeptiert die aktuelle Version der Nutzungsbedingungen (z. B. nach einer Änderung). */
+	@PostMapping("/me/terms")
+	UserRepository.UserProfile acceptTerms(Authentication auth) {
+		UserRepository.StoredUser user = repository.findByUsername(auth.getName())
+				.orElseThrow(() -> new ResponseStatusException(HttpStatus.UNAUTHORIZED));
+		repository.acceptTerms(user.id(), termsVersion);
+		return me(auth);
 	}
 
 	@PutMapping("/me/password")

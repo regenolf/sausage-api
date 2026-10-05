@@ -23,7 +23,9 @@ class UserExportRepository {
 	Map<String, Object> export(long userId) {
 		Map<String, Object> data = new LinkedHashMap<>();
 		data.put("profil", rows("""
-				SELECT id, username, email, role, enabled, to_char(created_at, 'YYYY-MM-DD"T"HH24:MI:SS') AS erstellt_am
+				SELECT id, username, email, role, enabled, to_char(created_at, 'YYYY-MM-DD"T"HH24:MI:SS') AS erstellt_am,
+				       terms_version AS nutzungsbedingungen_version,
+				       to_char(terms_accepted_at, 'YYYY-MM-DD"T"HH24:MI:SS') AS nutzungsbedingungen_akzeptiert_am
 				FROM app_user WHERE id = :id""", userId).stream().findFirst().orElse(Map.of()));
 		data.put("spots", rows("""
 				SELECT s.id, c.code AS kategorie, s.name, s.description AS beschreibung, s.street AS strasse,

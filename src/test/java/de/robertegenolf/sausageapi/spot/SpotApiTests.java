@@ -54,7 +54,7 @@ class SpotApiTests {
 	void registrierungLiefertCreatedUndDoppelteNamenKonflikt() throws Exception {
 		String username = newName();
 		String body = """
-				{"username":"%s","email":"%s@test.de","password":"geheimesPasswort"}
+				{"username":"%s","email":"%s@test.de","acceptTerms":true,"password":"geheimesPasswort"}
 				""".formatted(username, username);
 
 		mvc.perform(post("/api/users").contentType(MediaType.APPLICATION_JSON).content(body))
@@ -558,10 +558,10 @@ class SpotApiTests {
 		String jwt = token(leaver);
 
 		mvc.perform(delete("/api/users/me").with(httpBasic(leaver, PASSWORD))
-						.contentType(MediaType.APPLICATION_JSON).content("{\"password\":\"falsch\"}"))
+						.contentType(MediaType.APPLICATION_JSON).content("{\"acceptTerms\":true,\"password\":\"falsch\"}"))
 				.andExpect(status().isBadRequest());
 		mvc.perform(delete("/api/users/me").with(httpBasic(leaver, PASSWORD))
-						.contentType(MediaType.APPLICATION_JSON).content("{\"password\":\"" + PASSWORD + "\"}"))
+						.contentType(MediaType.APPLICATION_JSON).content("{\"acceptTerms\":true,\"password\":\"" + PASSWORD + "\"}"))
 				.andExpect(status().isNoContent());
 
 		mvc.perform(get("/api/users/me").with(httpBasic(leaver, PASSWORD)))
@@ -589,7 +589,7 @@ class SpotApiTests {
 		String email = name + "@frontend.de";
 
 		String json = mvc.perform(post("/api/auth/register").contentType(MediaType.APPLICATION_JSON)
-						.content("{\"email\":\"%s\",\"password\":\"%s\",\"displayName\":\"%s\"}"
+						.content("{\"email\":\"%s\",\"acceptTerms\":true,\"password\":\"%s\",\"displayName\":\"%s\"}"
 								.formatted(email, PASSWORD, name)))
 				.andExpect(status().isCreated())
 				.andExpect(jsonPath("$.token").exists())
@@ -601,14 +601,14 @@ class SpotApiTests {
 				.andExpect(jsonPath("$.email").value(email));
 
 		mvc.perform(post("/api/auth/register").contentType(MediaType.APPLICATION_JSON)
-						.content("{\"email\":\"%s\",\"password\":\"%s\",\"displayName\":\"anders%s\"}"
+						.content("{\"email\":\"%s\",\"acceptTerms\":true,\"password\":\"%s\",\"displayName\":\"anders%s\"}"
 								.formatted(email, PASSWORD, name)))
 				.andExpect(status().isConflict());
 
 		// Anmeldung mit E-Mail (Groß-/Kleinschreibung egal) oder Benutzername
 		for (String login : new String[] {email.toUpperCase(), name}) {
 			String loginJson = mvc.perform(post("/api/auth/login").contentType(MediaType.APPLICATION_JSON)
-							.content("{\"email\":\"%s\",\"password\":\"%s\"}".formatted(login, PASSWORD)))
+							.content("{\"email\":\"%s\",\"acceptTerms\":true,\"password\":\"%s\"}".formatted(login, PASSWORD)))
 					.andExpect(status().isOk())
 					.andReturn().getResponse().getContentAsString();
 			String token = JsonPath.read(loginJson, "$.token");
@@ -617,7 +617,7 @@ class SpotApiTests {
 			org.assertj.core.api.Assertions.assertThat(JsonPath.<String>read(payload, "$.name")).isEqualTo(name);
 		}
 		mvc.perform(post("/api/auth/login").contentType(MediaType.APPLICATION_JSON)
-						.content("{\"email\":\"%s\",\"password\":\"falsch\"}".formatted(email)))
+						.content("{\"email\":\"%s\",\"acceptTerms\":true,\"password\":\"falsch\"}".formatted(email)))
 				.andExpect(status().isUnauthorized())
 				.andExpect(jsonPath("$.detail").value("E-Mail oder Passwort ist falsch"));
 	}
@@ -627,23 +627,23 @@ class SpotApiTests {
 		String victim = newName();
 		String email = victim + "@opfer.de";
 		mvc.perform(post("/api/auth/register").contentType(MediaType.APPLICATION_JSON)
-						.content("{\"email\":\"%s\",\"password\":\"%s\",\"displayName\":\"%s\"}".formatted(email, PASSWORD, victim)))
+						.content("{\"email\":\"%s\",\"acceptTerms\":true,\"password\":\"%s\",\"displayName\":\"%s\"}".formatted(email, PASSWORD, victim)))
 				.andExpect(status().isCreated());
 
 		// Angreifer versucht, die E-Mail des Opfers als Anzeigenamen zu belegen
 		mvc.perform(post("/api/auth/register").contentType(MediaType.APPLICATION_JSON)
-						.content("{\"email\":\"%s\",\"password\":\"%s\",\"displayName\":\"%s\"}".formatted("x" + email, PASSWORD, email)))
+						.content("{\"email\":\"%s\",\"acceptTerms\":true,\"password\":\"%s\",\"displayName\":\"%s\"}".formatted("x" + email, PASSWORD, email)))
 				.andExpect(status().isBadRequest());
 		mvc.perform(post("/api/users").contentType(MediaType.APPLICATION_JSON)
-						.content("{\"username\":\"%s\",\"email\":\"%s\",\"password\":\"%s\"}".formatted(email, "y" + email, PASSWORD)))
+						.content("{\"username\":\"%s\",\"email\":\"%s\",\"acceptTerms\":true,\"password\":\"%s\"}".formatted(email, "y" + email, PASSWORD)))
 				.andExpect(status().isBadRequest());
 		// gleiche E-Mail in anderer Schreibweise ist vergeben
 		mvc.perform(post("/api/auth/register").contentType(MediaType.APPLICATION_JSON)
-						.content("{\"email\":\"%s\",\"password\":\"%s\",\"displayName\":\"anders%s\"}".formatted(email.toUpperCase(), PASSWORD, victim)))
+						.content("{\"email\":\"%s\",\"acceptTerms\":true,\"password\":\"%s\",\"displayName\":\"anders%s\"}".formatted(email.toUpperCase(), PASSWORD, victim)))
 				.andExpect(status().isConflict());
 
 		mvc.perform(post("/api/auth/login").contentType(MediaType.APPLICATION_JSON)
-						.content("{\"email\":\"%s\",\"password\":\"%s\"}".formatted(email, PASSWORD)))
+						.content("{\"email\":\"%s\",\"acceptTerms\":true,\"password\":\"%s\"}".formatted(email, PASSWORD)))
 				.andExpect(status().isOk());
 	}
 
@@ -715,7 +715,7 @@ class SpotApiTests {
 				.andExpect(status().isUnauthorized());
 
 		String json = mvc.perform(post("/api/auth/login").contentType(MediaType.APPLICATION_JSON)
-						.content("{\"email\":\"" + username + "\",\"password\":\"neuesPasswort1\"}"))
+						.content("{\"email\":\"" + username + "\",\"acceptTerms\":true,\"password\":\"neuesPasswort1\"}"))
 				.andExpect(status().isOk())
 				.andReturn().getResponse().getContentAsString();
 		String neu = JsonPath.read(json, "$.token");
@@ -863,30 +863,60 @@ class SpotApiTests {
 	void benutzernamenSindEingeschraenkt() throws Exception {
 		for (String bad : new String[] {"Wurst/Hans", "a%b", "semi;colon", "back\\\\slash", " -abc", "zwei\\nzeilen"}) {
 			mvc.perform(post("/api/auth/register").contentType(MediaType.APPLICATION_JSON)
-							.content("{\"email\":\"%s@test.de\",\"password\":\"%s\",\"displayName\":\"%s\"}"
+							.content("{\"email\":\"%s@test.de\",\"acceptTerms\":true,\"password\":\"%s\",\"displayName\":\"%s\"}"
 									.formatted(newName(), PASSWORD, bad)))
 					.andExpect(status().isBadRequest());
 		}
 		for (String reserved : new String[] {"Admin", "Sausage-Team", "moderator"}) {
 			mvc.perform(post("/api/auth/register").contentType(MediaType.APPLICATION_JSON)
-							.content("{\"email\":\"%s@test.de\",\"password\":\"%s\",\"displayName\":\"%s\"}"
+							.content("{\"email\":\"%s@test.de\",\"acceptTerms\":true,\"password\":\"%s\",\"displayName\":\"%s\"}"
 									.formatted(newName(), PASSWORD, reserved)))
 					.andExpect(status().isConflict());
 		}
 		// Erlaubt: Umlaute, Leerzeichen, Punkt, Unterstrich, Bindestrich; Vollbreite-Zeichen werden vereinheitlicht
 		String suffix = newName().substring(1);
 		mvc.perform(post("/api/auth/register").contentType(MediaType.APPLICATION_JSON)
-						.content("{\"email\":\"%s@test.de\",\"password\":\"%s\",\"displayName\":\"Jörg Würst_%s.x-y\"}"
+						.content("{\"email\":\"%s@test.de\",\"acceptTerms\":true,\"password\":\"%s\",\"displayName\":\"Jörg Würst_%s.x-y\"}"
 								.formatted(newName(), PASSWORD, suffix)))
 				.andExpect(status().isCreated());
 		String json = mvc.perform(post("/api/auth/register").contentType(MediaType.APPLICATION_JSON)
-						.content("{\"email\":\"%s@test.de\",\"password\":\"%s\",\"displayName\":\"ＭＡＸ%s\"}"
+						.content("{\"email\":\"%s@test.de\",\"acceptTerms\":true,\"password\":\"%s\",\"displayName\":\"ＭＡＸ%s\"}"
 								.formatted(newName(), PASSWORD, suffix)))
 				.andExpect(status().isCreated())
 				.andReturn().getResponse().getContentAsString();
 		String token = JsonPath.read(json, "$.token");
 		mvc.perform(get("/api/users/me").header("Authorization", "Bearer " + token))
 				.andExpect(jsonPath("$.username").value("MAX" + suffix));
+	}
+
+	@Test
+	void registrierungVerlangtZustimmungZuNutzungsbedingungen() throws Exception {
+		for (String terms : new String[] {"", ",\"acceptTerms\":false"}) {
+			String name = newName();
+			mvc.perform(post("/api/auth/register").contentType(MediaType.APPLICATION_JSON)
+							.content("{\"email\":\"%s@test.de\",\"displayName\":\"%s\",\"password\":\"%s\"%s}"
+									.formatted(name, name, PASSWORD, terms)))
+					.andExpect(status().isBadRequest())
+					.andExpect(jsonPath("$.errors.acceptTerms").value(org.hamcrest.Matchers.containsString("16 Jahre")));
+			mvc.perform(post("/api/users").contentType(MediaType.APPLICATION_JSON)
+							.content("{\"username\":\"%s\",\"email\":\"%s@test.de\",\"password\":\"%s\"%s}"
+									.formatted(name, name, PASSWORD, terms)))
+					.andExpect(status().isBadRequest())
+					.andExpect(jsonPath("$.errors.acceptTerms").exists());
+		}
+
+		String username = newName();
+		register(username);
+		mvc.perform(get("/api/users/me").with(httpBasic(username, PASSWORD)))
+				.andExpect(jsonPath("$.termsVersion").value("2026-10-05"))
+				.andExpect(jsonPath("$.termsAcceptedAt").exists())
+				.andExpect(jsonPath("$.currentTermsVersion").value("2026-10-05"));
+		jdbc.sql("UPDATE app_user SET terms_version = 'alt' WHERE username = :u").param("u", username).update();
+		mvc.perform(post("/api/users/me/terms").with(httpBasic(username, PASSWORD)))
+				.andExpect(status().isOk())
+				.andExpect(jsonPath("$.termsVersion").value("2026-10-05"));
+		mvc.perform(get("/api/users/me/export").with(httpBasic(username, PASSWORD)))
+				.andExpect(jsonPath("$.profil.nutzungsbedingungen_version").value("2026-10-05"));
 	}
 
 	@Test
@@ -930,7 +960,7 @@ class SpotApiTests {
 
 	private void register(String username) throws Exception {
 		mvc.perform(post("/api/users").contentType(MediaType.APPLICATION_JSON).content("""
-						{"username":"%s","email":"%s@test.de","password":"geheimesPasswort"}
+						{"username":"%s","email":"%s@test.de","acceptTerms":true,"password":"geheimesPasswort"}
 						""".formatted(username, username)))
 				.andExpect(status().isCreated());
 	}

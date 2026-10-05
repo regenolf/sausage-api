@@ -3,10 +3,13 @@ package de.robertegenolf.sausageapi.security;
 import de.robertegenolf.sausageapi.user.UserRepository;
 import jakarta.servlet.http.HttpServletRequest;
 import jakarta.validation.Valid;
+import jakarta.validation.constraints.AssertTrue;
 import jakarta.validation.constraints.Email;
 import jakarta.validation.constraints.NotBlank;
+import jakarta.validation.constraints.NotNull;
 import jakarta.validation.constraints.Pattern;
 import jakarta.validation.constraints.Size;
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.dao.DuplicateKeyException;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
@@ -37,7 +40,10 @@ class TokenController {
 			@NotBlank @Email @Size(max = 255) String email,
 			@NotBlank @Size(min = 8, max = 100) String password,
 			@NotBlank @Size(min = 3, max = 50) @Pattern(regexp = UserRepository.USERNAME_PATTERN,
-					message = UserRepository.USERNAME_MESSAGE) String displayName) {
+					message = UserRepository.USERNAME_MESSAGE) String displayName,
+			/** Nutzungsbedingungen akzeptiert und Mindestalter (16) bestätigt. */
+			@NotNull(message = UserRepository.TERMS_MESSAGE) @AssertTrue(message = UserRepository.TERMS_MESSAGE)
+			Boolean acceptTerms) {
 	}
 
 	private final TokenService tokens;
@@ -46,13 +52,16 @@ class TokenController {
 	private final LoginThrottle throttle;
 	/** Wird geprüft, wenn es den Account nicht gibt, damit die Antwortzeit nichts verrät. */
 	private final String dummyHash;
+	private final String termsVersion;
 
-	TokenController(TokenService tokens, UserRepository users, PasswordEncoder passwordEncoder, LoginThrottle throttle) {
+	TokenController(TokenService tokens, UserRepository users, PasswordEncoder passwordEncoder, LoginThrottle throttle,
+			@Value("${app.terms.version}") String termsVersion) {
 		this.tokens = tokens;
 		this.users = users;
 		this.passwordEncoder = passwordEncoder;
 		this.throttle = throttle;
 		this.dummyHash = passwordEncoder.encode("kein-account-vorhanden");
+		this.termsVersion = termsVersion;
 	}
 
 	/** Tauscht HTTP-Basic-Login (oder ein noch gültiges Token) gegen ein neues JWT. */
@@ -97,7 +106,8 @@ class TokenController {
 			throw new ResponseStatusException(HttpStatus.CONFLICT, "Dieser Anzeigename ist reserviert");
 		}
 		try {
-			long id = users.create(username, request.email().trim(), passwordEncoder.encode(request.password()));
+			long id = users.create(username, request.email().trim(), passwordEncoder.encode(request.password()),
+					termsVersion);
 			UserRepository.StoredUser user = users.findByUsername(username).orElseThrow();
 			return ResponseEntity.created(URI.create("/api/users/" + id)).body(TokenService.TokenResponse.of(tokens.issue(user)));
 		}

@@ -50,6 +50,7 @@ docker compose -f docker-compose.prod.yml exec -T db pg_restore -U sausage -d sa
 | `DB_URL` | `jdbc:postgresql://localhost:5432/sausage` |
 | `DB_USERNAME` / `DB_PASSWORD` | `sausage` / `sausage` |
 | `JWT_SECRET` | leer → zufälliger Schlüssel pro Start (Anmeldungen gehen bei Neustart verloren) – **in Produktion setzen** (mind. 32 Zeichen) |
+| `TERMS_VERSION` | `2026-10-05` – bei jeder Änderung der Nutzungsbedingungen erhöhen |
 | `PUBLIC_URL` | leer (aus der Anfrage); öffentliche Adresse für absolute Foto-URLs, im Produktions-Setup `https://DOMAIN` |
 | `API_DOCS_ENABLED` | `true` (Swagger UI und `/v3/api-docs`; im Produktions-Setup `false`) |
 | `JWT_VALIDITY` | `P30D` |
@@ -86,12 +87,13 @@ sofort ungültig, ebenso ein gesperrter oder gelöschter Account. Rollenänderun
 
 | Methode | Pfad | Beschreibung |
 |---|---|---|
-| `POST` | `/api/users` | Registrieren (öffentlich) |
-| `POST` | `/api/auth/register` | Registrieren und direkt anmelden (`email`, `password`, `displayName` 3–50 Zeichen: Buchstaben, Ziffern, Leerzeichen, `.`, `_`, `-`; reservierte Namen wie „Admin“ sind gesperrt) → Token |
+| `POST` | `/api/users` | Registrieren (`username`, `email`, `password`, `acceptTerms: true`) |
+| `POST` | `/api/auth/register` | Registrieren und direkt anmelden (`email`, `password`, `acceptTerms: true` = Nutzungsbedingungen akzeptiert und mindestens 16 Jahre, `displayName` 3–50 Zeichen: Buchstaben, Ziffern, Leerzeichen, `.`, `_`, `-`; reservierte Namen wie „Admin“ sind gesperrt) → Token |
 | `POST` | `/api/auth/login` | Anmelden (`email` oder Benutzername, `password`) → Token |
 | `POST` | `/api/auth/token` | JWT holen bzw. verlängern (mit Basic Auth oder gültigem Token) 🔒 |
 | `POST` | `/api/auth/logout-all` | Auf allen Geräten abmelden (alle Tokens ungültig) 🔒 |
-| `GET` | `/api/users/me` | Eigenes Profil 🔒 |
+| `GET` | `/api/users/me` | Eigenes Profil inkl. akzeptierter (`termsVersion`) und aktueller Version der Nutzungsbedingungen (`currentTermsVersion`) 🔒 |
+| `POST` | `/api/users/me/terms` | Aktuelle Nutzungsbedingungen akzeptieren (nach einer Änderung) 🔒 |
 | `GET` | `/api/users/me/spots` | Eigene Spots, neueste zuerst 🔒 |
 | `GET` | `/api/users/me/export` | Alle eigenen Daten als JSON-Datei (Auskunft/Datenübertragbarkeit, Art. 15/20 DSGVO) 🔒 |
 | `DELETE` | `/api/users/me` | Account löschen (Body `{"password":…}`): Bewertungen, Kommentare, Fotos werden gelöscht, eigene Spots anonymisiert 🔒 |

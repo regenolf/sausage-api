@@ -132,7 +132,7 @@ class ModerationTests {
 		String admin = register();
 		jdbc.sql("UPDATE app_user SET role = 'ADMIN' WHERE username = :u").param("u", admin).update();
 		String json = mvc.perform(post("/api/auth/login").contentType(MediaType.APPLICATION_JSON)
-						.content("{\"email\":\"" + user + "\",\"password\":\"" + PASSWORD + "\"}"))
+						.content("{\"email\":\"" + user + "\",\"acceptTerms\":true,\"password\":\"" + PASSWORD + "\"}"))
 				.andReturn().getResponse().getContentAsString();
 		String token = JsonPath.read(json, "$.token");
 
@@ -145,7 +145,7 @@ class ModerationTests {
 		mvc.perform(get("/api/users/me").header("Authorization", "Bearer " + token)).andExpect(status().isUnauthorized());
 		mvc.perform(get("/api/users/me").with(httpBasic(user, PASSWORD))).andExpect(status().isUnauthorized());
 		mvc.perform(post("/api/auth/login").contentType(MediaType.APPLICATION_JSON)
-						.content("{\"email\":\"" + user + "\",\"password\":\"" + PASSWORD + "\"}"))
+						.content("{\"email\":\"" + user + "\",\"acceptTerms\":true,\"password\":\"" + PASSWORD + "\"}"))
 				.andExpect(status().isUnauthorized());
 
 		mvc.perform(put("/api/admin/users/" + user + "/status").with(httpBasic(admin, PASSWORD))
@@ -164,7 +164,7 @@ class ModerationTests {
 	private String register() throws Exception {
 		String name = "m" + UUID.randomUUID().toString().substring(0, 8);
 		mvc.perform(post("/api/users").contentType(MediaType.APPLICATION_JSON)
-						.content("{\"username\":\"%s\",\"email\":\"%s@test.de\",\"password\":\"%s\"}".formatted(name, name, PASSWORD)))
+						.content("{\"username\":\"%s\",\"email\":\"%s@test.de\",\"acceptTerms\":true,\"password\":\"%s\"}".formatted(name, name, PASSWORD)))
 				.andExpect(status().isCreated());
 		return name;
 	}
