@@ -1,5 +1,6 @@
 package de.robertegenolf.sausageapi.spot;
 
+import com.jayway.jsonpath.JsonPath;
 import de.robertegenolf.sausageapi.TestcontainersConfiguration;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -397,6 +398,51 @@ class SpotApiTests {
 						.contentType(MediaType.APPLICATION_JSON).content("{\"code\":\"klein\",\"name\":\"x\"}"))
 				.andExpect(status().isBadRequest())
 				.andExpect(jsonPath("$.errors.code").exists());
+	}
+
+	@Test
+	void loginPerJwt() throws Exception {
+		String username = newName();
+		register(username);
+
+		mvc.perform(post("/api/auth/token").with(httpBasic(username, "falsch")))
+				.andExpect(status().isUnauthorized());
+		String token = token(username);
+
+		mvc.perform(get("/api/users/me").header("Authorization", "Bearer " + token))
+				.andExpect(status().isOk())
+				.andExpect(jsonPath("$.username").value(username));
+		mvc.perform(post("/api/spots").header("Authorization", "Bearer " + token)
+						.contentType(MediaType.APPLICATION_JSON).content(spotJson("JWT " + username, 50.9, 6.9)))
+				.andExpect(status().isCreated())
+				.andExpect(jsonPath("$.createdBy").value(username));
+
+		mvc.perform(get("/api/users/me").header("Authorization", "Bearer " + token + "x"))
+				.andExpect(status().isUnauthorized());
+		mvc.perform(get("/api/users/me").header("Authorization", "Bearer kein.gueltiges.token"))
+				.andExpect(status().isUnauthorized());
+	}
+
+	@Test
+	void jwtEnthaeltAdminRolle() throws Exception {
+		String admin = newName();
+		register(admin);
+		jdbc.sql("UPDATE app_user SET role = 'ADMIN' WHERE username = :u").param("u", admin).update();
+
+		String code = "JWT_" + admin.toUpperCase();
+		mvc.perform(post("/api/categories").header("Authorization", "Bearer " + token(admin))
+						.contentType(MediaType.APPLICATION_JSON)
+						.content("{\"code\":\"" + code + "\",\"name\":\"Per JWT\"}"))
+				.andExpect(status().isCreated());
+	}
+
+	private String token(String username) throws Exception {
+		String json = mvc.perform(post("/api/auth/token").with(httpBasic(username, PASSWORD)))
+				.andExpect(status().isOk())
+				.andExpect(jsonPath("$.tokenType").value("Bearer"))
+				.andExpect(jsonPath("$.expiresIn").value(3600))
+				.andReturn().getResponse().getContentAsString();
+		return JsonPath.read(json, "$.accessToken");
 	}
 
 	private long createSpot(String username, String name) throws Exception {

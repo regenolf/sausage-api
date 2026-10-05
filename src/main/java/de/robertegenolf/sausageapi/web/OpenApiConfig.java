@@ -21,8 +21,12 @@ class OpenApiConfig {
 						.title("Sausage API")
 						.description("Bratwurstbuden und andere Spots finden, bewerten und kommentieren")
 						.version("v1"))
-				.components(new Components().addSecuritySchemes("basicAuth",
-						new SecurityScheme().type(SecurityScheme.Type.HTTP).scheme("basic")))
-				.addSecurityItem(new SecurityRequirement().addList("basicAuth"));
+				.components(new Components()
+						.addSecuritySchemes("basicAuth",
+								new SecurityScheme().type(SecurityScheme.Type.HTTP).scheme("basic"))
+						.addSecuritySchemes("bearerAuth",
+								new SecurityScheme().type(SecurityScheme.Type.HTTP).scheme("bearer").bearerFormat("JWT")))
+				.addSecurityItem(new SecurityRequirement().addList("basicAuth"))
+				.addSecurityItem(new SecurityRequirement().addList("bearerAuth"));
 	}
 }

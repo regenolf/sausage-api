@@ -40,7 +40,8 @@ class SecurityConfig {
 						.requestMatchers(HttpMethod.GET, "/v3/api-docs/**", "/swagger-ui.html", "/swagger-ui/**").permitAll()
 						.anyRequest().authenticated())
 				.httpBasic(basic -> {
-				});
+				})
+				.oauth2ResourceServer(oauth -> oauth.jwt(Customizer.withDefaults()));
 		return http.build();
 	}
 

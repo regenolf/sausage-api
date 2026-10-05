@@ -28,6 +28,8 @@ docker compose --profile app up --build   # API auf http://localhost:8080
 |---|---|
 | `DB_URL` | `jdbc:postgresql://localhost:5432/sausage` |
 | `DB_USERNAME` / `DB_PASSWORD` | `sausage` / `sausage` |
+| `JWT_SECRET` | Entwicklungs-Schlüssel – **in Produktion setzen** (mind. 32 Zeichen) |
+| `JWT_VALIDITY` | `PT1H` |
 | `CORS_ALLOWED_ORIGINS` | `http://localhost:3000,http://localhost:5173` |
 
 API-Doku (Swagger UI): http://localhost:8080/swagger-ui.html
@@ -37,11 +39,22 @@ Die GitHub-Actions-CI (`.github/workflows/ci.yml`) führt `./mvnw verify` aus.
 
 ## API
 
-Lesende `GET`-Endpunkte sind öffentlich, alles andere braucht HTTP Basic Auth.
+Lesende `GET`-Endpunkte sind öffentlich, alles andere braucht Anmeldung – entweder per HTTP Basic Auth
+oder per JWT:
+
+```bash
+curl -u name:passwort -X POST http://localhost:8080/api/auth/token
+# {"accessToken":"eyJ...","tokenType":"Bearer","expiresIn":3600}
+curl -H "Authorization: Bearer eyJ..." http://localhost:8080/api/users/me
+```
+
+Tokens sind `app.jwt.validity` lang gültig (Standard 1 Stunde) und bleiben das auch nach einer
+Passwortänderung bis zum Ablauf.
 
 | Methode | Pfad | Beschreibung |
 |---|---|---|
 | `POST` | `/api/users` | Registrieren (öffentlich) |
+| `POST` | `/api/auth/token` | JWT holen (mit Basic Auth oder gültigem Token) 🔒 |
 | `GET` | `/api/users/me` | Eigenes Profil 🔒 |
 | `GET` | `/api/users/me/spots` | Eigene Spots, neueste zuerst 🔒 |
 | `PUT` | `/api/users/me/password` | Passwort ändern (`currentPassword`, `newPassword`) 🔒 |
