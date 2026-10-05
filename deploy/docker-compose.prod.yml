@@ -1,0 +1,94 @@
+# Produktions-Setup für Sausage: HTTPS (Caddy) -> App (nginx aus sausage-app) -> API -> Postgres,
+# dazu ein tägliches Datenbank-Backup (enthält auch alle Fotos).
+#
+#   cd deploy && cp .env.example .env   # Werte eintragen
+#   docker compose -f docker-compose.prod.yml up -d --build
+#
+# Erwartet sausage-app neben sausage-api ausgecheckt (sonst APP_SOURCE in .env anpassen).
+name: sausage
+
+services:
+  caddy:
+    image: caddy:2-alpine
+    restart: unless-stopped
+    ports:
+      - "80:80"
+      - "443:443"
+      - "443:443/udp"
+    environment:
+      DOMAIN: ${DOMAIN:?DOMAIN in .env setzen, z. B. wurst.example.de}
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy-data:/data
+      - caddy-config:/config
+    depends_on:
+      - app
+
+  app:
+    build: ${APP_SOURCE:-../../sausage-app}
+    restart: unless-stopped
+    environment:
+      BACKEND_URL: http://api:8080
+    depends_on:
+      api:
+        condition: service_healthy
+
+  api:
+    build: ..
+    restart: unless-stopped
+    environment:
+      DB_URL: jdbc:postgresql://db:5432/sausage
+      DB_USERNAME: sausage
+      DB_PASSWORD: ${DB_PASSWORD:?DB_PASSWORD in .env setzen}
+      JWT_SECRET: ${JWT_SECRET:?JWT_SECRET in .env setzen (mind. 32 Zeichen)}
+      # Web-App läuft unter derselben Domain (kein CORS nötig); erlaubt werden die nativen Apps
+      CORS_ALLOWED_ORIGINS: capacitor://localhost,https://localhost
+    depends_on:
+      db:
+        condition: service_healthy
+
+  db:
+    image: postgres:17
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: sausage
+      POSTGRES_USER: sausage
+      POSTGRES_PASSWORD: ${DB_PASSWORD:?DB_PASSWORD in .env setzen}
+    volumes:
+      - db-data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U sausage -d sausage"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+  # Tägliches pg_dump nach ./backups (auf dem Host; von dort zusätzlich extern sichern!)
+  backup:
+    image: postgres:17
+    restart: unless-stopped
+    environment:
+      PGHOST: db
+      PGUSER: sausage
+      PGDATABASE: sausage
+      PGPASSWORD: ${DB_PASSWORD:?DB_PASSWORD in .env setzen}
+      BACKUP_KEEP_DAYS: ${BACKUP_KEEP_DAYS:-14}
+      BACKUP_INTERVAL_SECONDS: ${BACKUP_INTERVAL_SECONDS:-86400}
+    volumes:
+      - ./backups:/backups
+    entrypoint: ["/bin/sh", "-c"]
+    command:
+      - |
+        while true; do
+          file=/backups/sausage-$$(date +%Y-%m-%d_%H%M).dump
+          if pg_dump -Fc -f "$$file.tmp"; then mv "$$file.tmp" "$$file"; echo "Backup $$file"; else rm -f "$$file.tmp"; echo "Backup FEHLGESCHLAGEN" >&2; fi
+          find /backups -name 'sausage-*.dump' -mtime +$$BACKUP_KEEP_DAYS -delete
+          sleep $$BACKUP_INTERVAL_SECONDS
+        done
+    depends_on:
+      db:
+        condition: service_healthy
+
+volumes:
+  caddy-data:
+  caddy-config:
+  db-data:

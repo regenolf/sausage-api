@@ -22,6 +22,27 @@ API und Datenbank komplett im Container:
 docker compose --profile app up --build   # API auf http://localhost:8080
 ```
 
+### Produktion (App + API + Datenbank + HTTPS + Backups)
+
+`deploy/docker-compose.prod.yml` startet alles zusammen auf einem Server: Caddy (HTTPS mit automatischem
+Let's-Encrypt-Zertifikat) → nginx der App (`regenolf/sausage-app`, liefert die Web-App aus und leitet `/api` weiter) → API
+→ Postgres, dazu ein tägliches `pg_dump` nach `deploy/backups/`. API, Datenbank, Actuator und Swagger sind von außen
+nicht erreichbar, nur `https://DOMAIN` und `https://DOMAIN/api/…`.
+
+```bash
+git clone https://github.com/regenolf/sausage-api && git clone https://github.com/regenolf/sausage-app
+cd sausage-api/deploy
+cp .env.example .env        # DOMAIN, DB_PASSWORD, JWT_SECRET eintragen
+docker compose -f docker-compose.prod.yml up -d --build
+```
+
+Voraussetzungen: DNS von `DOMAIN` zeigt auf den Server, Ports 80 und 443 sind offen.
+Backups zusätzlich außerhalb des Servers sichern (sie enthalten auch alle Fotos). Wiederherstellen:
+
+```bash
+docker compose -f docker-compose.prod.yml exec -T db pg_restore -U sausage -d sausage --clean < backups/sausage-JJJJ-MM-TT_HHMM.dump
+```
+
 ### Konfiguration (Umgebungsvariablen)
 
 | Variable | Standard |
