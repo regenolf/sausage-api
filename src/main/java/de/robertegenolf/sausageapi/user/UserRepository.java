@@ -15,6 +15,11 @@ public class UserRepository {
 	public record UserProfile(long id, String username, String email, String role, Instant createdAt) {
 	}
 
+	/** Benutzernamen dürfen kein "@" (sonst Verwechslung mit E-Mail beim Login) und kein ":" (Basic Auth) enthalten. */
+	public static final String USERNAME_PATTERN = "[^@:]+";
+
+	public static final String USERNAME_MESSAGE = "darf weder @ noch : enthalten";
+
 	private final JdbcClient jdbc;
 
 	UserRepository(JdbcClient jdbc) {
@@ -29,14 +34,16 @@ public class UserRepository {
 				.optional();
 	}
 
-	/** Sucht per Benutzername oder E-Mail (Groß-/Kleinschreibung der E-Mail egal). */
+	/**
+	 * Enthält {@code login} ein "@", wird per E-Mail gesucht (Groß-/Kleinschreibung egal), sonst per Benutzername.
+	 * Da Benutzernamen kein "@" enthalten dürfen, kann ein fremder Account den E-Mail-Login nicht überdecken.
+	 */
 	public Optional<StoredUser> findByLogin(String login) {
+		String where = login.contains("@") ? "lower(email) = lower(:login)" : "username = :login";
 		return jdbc.sql("""
 				SELECT id, username, password_hash, role, token_version FROM app_user
-				WHERE (username = :login OR lower(email) = lower(:login)) AND enabled
-				ORDER BY (username = :login) DESC
-				LIMIT 1
-				""")
+				WHERE %s AND enabled
+				""".formatted(where))
 				.param("login", login)
 				.query((rs, n) -> new StoredUser(rs.getLong("id"), rs.getString("username"),
 						rs.getString("password_hash"), rs.getString("role"), rs.getInt("token_version")))

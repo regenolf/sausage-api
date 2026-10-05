@@ -1,9 +1,11 @@
 package de.robertegenolf.sausageapi.security;
 
 import de.robertegenolf.sausageapi.user.UserRepository;
+import jakarta.servlet.http.HttpServletRequest;
 import jakarta.validation.Valid;
 import jakarta.validation.constraints.Email;
 import jakarta.validation.constraints.NotBlank;
+import jakarta.validation.constraints.Pattern;
 import jakarta.validation.constraints.Size;
 import org.springframework.dao.DuplicateKeyException;
 import org.springframework.http.HttpStatus;
@@ -17,6 +19,7 @@ import org.springframework.web.bind.annotation.RestController;
 import org.springframework.web.server.ResponseStatusException;
 
 import java.net.URI;
+import java.util.Optional;
 
 /**
  * Anmeldung per JWT. Das Token wird danach als {@code Authorization: Bearer <token>} mitgeschickt.
@@ -39,17 +42,23 @@ class TokenController {
 	public record RegisterRequest(
 			@NotBlank @Email @Size(max = 255) String email,
 			@NotBlank @Size(min = 8, max = 100) String password,
-			@NotBlank @Size(min = 3, max = 50) String displayName) {
+			@NotBlank @Size(min = 3, max = 50) @Pattern(regexp = UserRepository.USERNAME_PATTERN,
+					message = UserRepository.USERNAME_MESSAGE) String displayName) {
 	}
 
 	private final TokenService tokens;
 	private final UserRepository users;
 	private final PasswordEncoder passwordEncoder;
+	private final LoginThrottle throttle;
+	/** Wird geprüft, wenn es den Account nicht gibt, damit die Antwortzeit nichts verrät. */
+	private final String dummyHash;
 
-	TokenController(TokenService tokens, UserRepository users, PasswordEncoder passwordEncoder) {
+	TokenController(TokenService tokens, UserRepository users, PasswordEncoder passwordEncoder, LoginThrottle throttle) {
 		this.tokens = tokens;
 		this.users = users;
 		this.passwordEncoder = passwordEncoder;
+		this.throttle = throttle;
+		this.dummyHash = passwordEncoder.encode("kein-account-vorhanden");
 	}
 
 	/** Tauscht HTTP-Basic-Login (oder ein noch gültiges Token) gegen ein neues JWT. */
@@ -72,17 +81,23 @@ class TokenController {
 
 	/** Anmeldung mit E-Mail (oder Benutzername) und Passwort im JSON-Body. */
 	@PostMapping("/login")
-	TokenResponse login(@Valid @RequestBody LoginRequest request) {
-		UserRepository.StoredUser user = users.findByLogin(request.email().trim())
-				.filter(u -> passwordEncoder.matches(request.password(), u.passwordHash()))
-				.orElseThrow(() -> new ResponseStatusException(HttpStatus.UNAUTHORIZED,
-						"E-Mail oder Passwort ist falsch"));
-		return TokenResponse.of(tokens.issue(user));
+	TokenResponse login(@Valid @RequestBody LoginRequest request, HttpServletRequest http) {
+		String login = request.email().trim();
+		throttle.checkLogin(http.getRemoteAddr(), login);
+		Optional<UserRepository.StoredUser> user = users.findByLogin(login);
+		boolean valid = passwordEncoder.matches(request.password(), user.map(UserRepository.StoredUser::passwordHash)
+				.orElse(dummyHash));
+		if (!valid || user.isEmpty()) {
+			throttle.loginFailed(http.getRemoteAddr(), login);
+			throw new ResponseStatusException(HttpStatus.UNAUTHORIZED, "E-Mail oder Passwort ist falsch");
+		}
+		return TokenResponse.of(tokens.issue(user.get()));
 	}
 
 	/** Registriert einen Account (Anzeigename = Benutzername) und meldet direkt an. */
 	@PostMapping("/register")
-	ResponseEntity<TokenResponse> register(@Valid @RequestBody RegisterRequest request) {
+	ResponseEntity<TokenResponse> register(@Valid @RequestBody RegisterRequest request, HttpServletRequest http) {
+		throttle.checkRegistration(http.getRemoteAddr());
 		String username = request.displayName().trim();
 		try {
 			long id = users.create(username, request.email().trim(), passwordEncoder.encode(request.password()));

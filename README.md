@@ -49,10 +49,12 @@ docker compose -f docker-compose.prod.yml exec -T db pg_restore -U sausage -d sa
 |---|---|
 | `DB_URL` | `jdbc:postgresql://localhost:5432/sausage` |
 | `DB_USERNAME` / `DB_PASSWORD` | `sausage` / `sausage` |
-| `JWT_SECRET` | Entwicklungs-Schlüssel – **in Produktion setzen** (mind. 32 Zeichen) |
+| `JWT_SECRET` | leer → zufälliger Schlüssel pro Start (Anmeldungen gehen bei Neustart verloren) – **in Produktion setzen** (mind. 32 Zeichen) |
+| `API_DOCS_ENABLED` | `true` (Swagger UI und `/v3/api-docs`; im Produktions-Setup `false`) |
 | `JWT_VALIDITY` | `P30D` |
 | `app.rate-limit.registrations-per-hour` | `10` Registrierungen pro IP und Stunde |
-| `app.rate-limit.failed-logins-per-15-minutes` | `10` Fehlversuche pro IP, danach 429 bis zum Fensterende |
+| `app.rate-limit.failed-logins-per-15-minutes` | `10` Fehlversuche pro IP und Account, danach 429 bis zum Fensterende |
+| `app.rate-limit.failed-logins-per-ip-per-15-minutes` | `100` Fehlversuche pro IP über alle Accounts |
 | `CORS_ALLOWED_ORIGINS` | `http://localhost:8100,http://localhost:4200,capacitor://localhost,https://localhost,http://localhost:3000,http://localhost:5173` |
 
 API-Doku (Swagger UI): http://localhost:8080/swagger-ui.html
@@ -82,7 +84,7 @@ sofort ungültig, ebenso ein gesperrter oder gelöschter Account. Rollenänderun
 | Methode | Pfad | Beschreibung |
 |---|---|---|
 | `POST` | `/api/users` | Registrieren (öffentlich) |
-| `POST` | `/api/auth/register` | Registrieren und direkt anmelden (`email`, `password`, `displayName`) → Token |
+| `POST` | `/api/auth/register` | Registrieren und direkt anmelden (`email`, `password`, `displayName` 3–50 Zeichen ohne `@` und `:`) → Token |
 | `POST` | `/api/auth/login` | Anmelden (`email` oder Benutzername, `password`) → Token |
 | `POST` | `/api/auth/token` | JWT holen bzw. verlängern (mit Basic Auth oder gültigem Token) 🔒 |
 | `POST` | `/api/auth/logout-all` | Auf allen Geräten abmelden (alle Tokens ungültig) 🔒 |

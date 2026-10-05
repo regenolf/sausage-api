@@ -2,6 +2,7 @@ package de.robertegenolf.sausageapi.web;
 
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ProblemDetail;
+import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.MethodArgumentNotValidException;
 import org.springframework.web.bind.annotation.ExceptionHandler;
 import org.springframework.web.bind.annotation.RestControllerAdvice;
@@ -20,12 +21,13 @@ import java.util.Map;
 class ApiExceptionHandler {
 
 	@ExceptionHandler(ResponseStatusException.class)
-	ProblemDetail handleStatus(ResponseStatusException ex) {
+	ResponseEntity<ProblemDetail> handleStatus(ResponseStatusException ex) {
 		ProblemDetail problem = ProblemDetail.forStatus(ex.getStatusCode());
 		if (ex.getReason() != null) {
 			problem.setDetail(ex.getReason());
 		}
-		return problem;
+		// z. B. Retry-After bei 429
+		return ResponseEntity.status(ex.getStatusCode()).headers(ex.getHeaders()).body(problem);
 	}
 
 	@ExceptionHandler(MaxUploadSizeExceededException.class)

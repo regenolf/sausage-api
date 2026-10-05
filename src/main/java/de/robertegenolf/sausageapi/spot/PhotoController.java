@@ -50,10 +50,10 @@ class PhotoController {
 	ResponseEntity<byte[]> image(@PathVariable long spotId, @PathVariable long photoId) {
 		PhotoRepository.PhotoData photo = photos.findData(spotId, photoId)
 				.orElseThrow(() -> photoNotFound(photoId));
-		// Fotos ändern sich nie (nur löschen), daher lange cachebar
+		// Fotos ändern sich nie, werden aber evtl. gelöscht (z. B. nach einer Meldung) - daher nur einen Tag cachen
 		return ResponseEntity.ok()
 				.contentType(MediaType.parseMediaType(photo.contentType()))
-				.cacheControl(CacheControl.maxAge(Duration.ofDays(30)).cachePublic())
+				.cacheControl(CacheControl.maxAge(Duration.ofDays(1)).cachePublic())
 				.header("X-Content-Type-Options", "nosniff")
 				.body(photo.data());
 	}

@@ -16,6 +16,7 @@ import org.springframework.security.crypto.bcrypt.BCryptPasswordEncoder;
 import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.security.web.SecurityFilterChain;
 import org.springframework.web.cors.CorsConfiguration;
+import org.springframework.web.filter.CorsFilter;
 import org.springframework.web.cors.CorsConfigurationSource;
 import org.springframework.web.cors.UrlBasedCorsConfigurationSource;
 
@@ -26,8 +27,8 @@ import java.util.List;
 class SecurityConfig {
 
 	@Bean
-	SecurityFilterChain securityFilterChain(HttpSecurity http, UserJwtAuthenticationConverter jwtConverter)
-			throws Exception {
+	SecurityFilterChain securityFilterChain(HttpSecurity http, UserJwtAuthenticationConverter jwtConverter,
+			LoginThrottle loginThrottle) throws Exception {
 		http
 				.csrf(csrf -> csrf.disable())
 				.cors(Customizer.withDefaults())
@@ -42,7 +43,8 @@ class SecurityConfig {
 						.anyRequest().authenticated())
 				.httpBasic(basic -> {
 				})
-				.oauth2ResourceServer(oauth -> oauth.jwt(jwt -> jwt.jwtAuthenticationConverter(jwtConverter)));
+				.oauth2ResourceServer(oauth -> oauth.jwt(jwt -> jwt.jwtAuthenticationConverter(jwtConverter)))
+				.addFilterAfter(new BasicAuthThrottleFilter(loginThrottle), CorsFilter.class);
 		return http.build();
 	}
 

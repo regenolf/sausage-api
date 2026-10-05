@@ -43,6 +43,7 @@ services:
       JWT_SECRET: ${JWT_SECRET:?JWT_SECRET in .env setzen (mind. 32 Zeichen)}
       # Web-App läuft unter derselben Domain (kein CORS nötig); erlaubt werden die nativen Apps
       CORS_ALLOWED_ORIGINS: capacitor://localhost,https://localhost
+      API_DOCS_ENABLED: "false"
     depends_on:
       db:
         condition: service_healthy

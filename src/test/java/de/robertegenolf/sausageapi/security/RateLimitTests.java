@@ -82,6 +82,57 @@ class RateLimitTests {
 				.andExpect(status().isTooManyRequests());
 	}
 
+	@Test
+	void geteilteIpSperrtAngemeldeteNutzerNicht() throws Exception {
+		RequestPostProcessor ip = ip("10.0.3.1");
+		String user = "rl" + UUID.randomUUID().toString().substring(0, 8);
+		String json = mvc.perform(post("/api/auth/register").with(ip("10.0.3.9")).contentType(MediaType.APPLICATION_JSON)
+						.content("{\"email\":\"%s@test.de\",\"password\":\"geheimesPasswort\",\"displayName\":\"%s\"}"
+								.formatted(user, user)))
+				.andExpect(status().isCreated())
+				.andReturn().getResponse().getContentAsString();
+		String token = com.jayway.jsonpath.JsonPath.read(json, "$.token");
+
+		// jemand anderes hinter derselben IP rät Passwörter für einen anderen Account
+		for (int i = 0; i < 5; i++) {
+			mvc.perform(get("/api/users/me").with(ip).with(httpBasic("opfer" + user, "falsch" + i)));
+		}
+		// der angemeldete Nutzer (Bearer-Token) arbeitet ungestört weiter
+		mvc.perform(get("/api/users/me").with(ip).header("Authorization", "Bearer " + token))
+				.andExpect(status().isOk());
+		// und kann sich mit seinem eigenen Passwort anmelden
+		mvc.perform(post("/api/auth/login").with(ip).contentType(MediaType.APPLICATION_JSON)
+						.content("{\"email\":\"%s@test.de\",\"password\":\"geheimesPasswort\"}".formatted(user)))
+				.andExpect(status().isOk());
+	}
+
+	@Test
+	void kodierterPfadUmgehtDieSperreNicht() throws Exception {
+		RequestPostProcessor attacker = ip("10.0.4.1");
+		String body = "{\"email\":\"ziel@test.de\",\"password\":\"x\"}";
+		for (int i = 0; i < 6; i++) {
+			mvc.perform(post(java.net.URI.create("/api/auth/%6Cogin")).with(attacker)
+					.contentType(MediaType.APPLICATION_JSON).content(body));
+		}
+		mvc.perform(post("/api/auth/login").with(attacker).contentType(MediaType.APPLICATION_JSON).content(body))
+				.andExpect(status().isTooManyRequests())
+				.andExpect(header().exists("Retry-After"));
+	}
+
+	@Test
+	void antwort429HatCorsHeader() throws Exception {
+		RequestPostProcessor attacker = ip("10.0.5.1");
+		String body = "{\"email\":\"cors@test.de\",\"password\":\"x\"}";
+		for (int i = 0; i < 4; i++) {
+			mvc.perform(post("/api/auth/login").with(attacker).header("Origin", "capacitor://localhost")
+					.contentType(MediaType.APPLICATION_JSON).content(body));
+		}
+		mvc.perform(post("/api/auth/login").with(attacker).header("Origin", "capacitor://localhost")
+						.contentType(MediaType.APPLICATION_JSON).content(body))
+				.andExpect(status().isTooManyRequests())
+				.andExpect(header().string("Access-Control-Allow-Origin", "capacitor://localhost"));
+	}
+
 	private static org.springframework.test.web.servlet.RequestBuilder register(RequestPostProcessor ip) {
 		String name = "rl" + UUID.randomUUID().toString().substring(0, 8);
 		return post("/api/users").with(ip).contentType(MediaType.APPLICATION_JSON)

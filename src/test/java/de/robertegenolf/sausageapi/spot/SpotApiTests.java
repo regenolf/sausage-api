@@ -36,7 +36,8 @@ import static org.springframework.security.test.web.servlet.request.SecurityMock
  * Test-User mit zufälligem Namen an, damit sich die Tests nicht gegenseitig stören.
  */
 @SpringBootTest(properties = {"app.rate-limit.registrations-per-hour=10000",
-		"app.rate-limit.failed-logins-per-15-minutes=10000"})
+		"app.rate-limit.failed-logins-per-15-minutes=10000",
+		"app.rate-limit.failed-logins-per-ip-per-15-minutes=10000"})
 @Import(TestcontainersConfiguration.class)
 @AutoConfigureMockMvc
 class SpotApiTests {
@@ -606,6 +607,31 @@ class SpotApiTests {
 						.content("{\"email\":\"%s\",\"password\":\"falsch\"}".formatted(email)))
 				.andExpect(status().isUnauthorized())
 				.andExpect(jsonPath("$.detail").value("E-Mail oder Passwort ist falsch"));
+	}
+
+	@Test
+	void fremderAnzeigenameKannEmailLoginNichtBlockieren() throws Exception {
+		String victim = newName();
+		String email = victim + "@opfer.de";
+		mvc.perform(post("/api/auth/register").contentType(MediaType.APPLICATION_JSON)
+						.content("{\"email\":\"%s\",\"password\":\"%s\",\"displayName\":\"%s\"}".formatted(email, PASSWORD, victim)))
+				.andExpect(status().isCreated());
+
+		// Angreifer versucht, die E-Mail des Opfers als Anzeigenamen zu belegen
+		mvc.perform(post("/api/auth/register").contentType(MediaType.APPLICATION_JSON)
+						.content("{\"email\":\"%s\",\"password\":\"%s\",\"displayName\":\"%s\"}".formatted("x" + email, PASSWORD, email)))
+				.andExpect(status().isBadRequest());
+		mvc.perform(post("/api/users").contentType(MediaType.APPLICATION_JSON)
+						.content("{\"username\":\"%s\",\"email\":\"%s\",\"password\":\"%s\"}".formatted(email, "y" + email, PASSWORD)))
+				.andExpect(status().isBadRequest());
+		// gleiche E-Mail in anderer Schreibweise ist vergeben
+		mvc.perform(post("/api/auth/register").contentType(MediaType.APPLICATION_JSON)
+						.content("{\"email\":\"%s\",\"password\":\"%s\",\"displayName\":\"anders%s\"}".formatted(email.toUpperCase(), PASSWORD, victim)))
+				.andExpect(status().isConflict());
+
+		mvc.perform(post("/api/auth/login").contentType(MediaType.APPLICATION_JSON)
+						.content("{\"email\":\"%s\",\"password\":\"%s\"}".formatted(email, PASSWORD)))
+				.andExpect(status().isOk());
 	}
 
 	@Test

@@ -1,8 +1,11 @@
 package de.robertegenolf.sausageapi.user;
 
+import de.robertegenolf.sausageapi.security.LoginThrottle;
+import jakarta.servlet.http.HttpServletRequest;
 import jakarta.validation.Valid;
 import jakarta.validation.constraints.Email;
 import jakarta.validation.constraints.NotBlank;
+import jakarta.validation.constraints.Pattern;
 import jakarta.validation.constraints.Size;
 import org.springframework.dao.DuplicateKeyException;
 import org.springframework.http.HttpStatus;
@@ -25,7 +28,8 @@ import java.net.URI;
 class UserController {
 
 	public record RegisterRequest(
-			@NotBlank @Size(min = 3, max = 50) String username,
+			@NotBlank @Size(min = 3, max = 50) @Pattern(regexp = UserRepository.USERNAME_PATTERN,
+					message = UserRepository.USERNAME_MESSAGE) String username,
 			@NotBlank @Email @Size(max = 255) String email,
 			@NotBlank @Size(min = 8, max = 100) String password) {
 	}
@@ -43,14 +47,17 @@ class UserController {
 
 	private final UserRepository repository;
 	private final PasswordEncoder passwordEncoder;
+	private final LoginThrottle throttle;
 
-	UserController(UserRepository repository, PasswordEncoder passwordEncoder) {
+	UserController(UserRepository repository, PasswordEncoder passwordEncoder, LoginThrottle throttle) {
 		this.repository = repository;
 		this.passwordEncoder = passwordEncoder;
+		this.throttle = throttle;
 	}
 
 	@PostMapping
-	ResponseEntity<RegisteredUser> register(@Valid @RequestBody RegisterRequest request) {
+	ResponseEntity<RegisteredUser> register(@Valid @RequestBody RegisterRequest request, HttpServletRequest http) {
+		throttle.checkRegistration(http.getRemoteAddr());
 		try {
 			long id = repository.create(request.username(), request.email(),
 					passwordEncoder.encode(request.password()));
