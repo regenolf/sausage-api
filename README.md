@@ -30,9 +30,14 @@ docker compose --profile app up --build   # API auf http://localhost:8080
 | `DB_USERNAME` / `DB_PASSWORD` | `sausage` / `sausage` |
 | `JWT_SECRET` | Entwicklungs-Schlüssel – **in Produktion setzen** (mind. 32 Zeichen) |
 | `JWT_VALIDITY` | `PT1H` |
+| `app.rate-limit.registrations-per-hour` | `10` Registrierungen pro IP und Stunde |
+| `app.rate-limit.failed-logins-per-15-minutes` | `10` Fehlversuche pro IP, danach 429 bis zum Fensterende |
 | `CORS_ALLOWED_ORIGINS` | `http://localhost:3000,http://localhost:5173` |
 
 API-Doku (Swagger UI): http://localhost:8080/swagger-ui.html
+
+Läuft die API hinter einem Reverse-Proxy, `server.forward-headers-strategy=native` setzen, damit die
+Begrenzungen die echte Client-IP sehen.
 
 Health-Checks: `/actuator/health`, `/actuator/health/liveness`, `/actuator/health/readiness`.
 Die GitHub-Actions-CI (`.github/workflows/ci.yml`) führt `./mvnw verify` aus.

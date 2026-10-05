@@ -34,7 +34,8 @@ import static org.springframework.security.test.web.servlet.request.SecurityMock
  * Läuft gegen eine Postgres-Instanz aus Testcontainers (Docker nötig). Jeder Test legt eigene
  * Test-User mit zufälligem Namen an, damit sich die Tests nicht gegenseitig stören.
  */
-@SpringBootTest
+@SpringBootTest(properties = {"app.rate-limit.registrations-per-hour=10000",
+		"app.rate-limit.failed-logins-per-15-minutes=10000"})
 @Import(TestcontainersConfiguration.class)
 @AutoConfigureMockMvc
 class SpotApiTests {
