@@ -71,11 +71,19 @@ class PhotoController {
 		if (file.isEmpty()) {
 			throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "Die Datei ist leer");
 		}
-		byte[] data = file.getBytes();
-		String contentType = detectImageType(data);
+		byte[] upload = file.getBytes();
+		String contentType = detectImageType(upload);
 		if (contentType == null) {
 			throw new ResponseStatusException(HttpStatus.UNSUPPORTED_MEDIA_TYPE,
 					"Erlaubt sind nur JPEG-, PNG- und WebP-Bilder");
+		}
+		byte[] data;
+		try {
+			// GPS-Position und andere Metadaten nicht veröffentlichen
+			data = ImageMetadataStripper.strip(upload, contentType);
+		}
+		catch (ImageMetadataStripper.InvalidImageException ex) {
+			throw new ResponseStatusException(HttpStatus.BAD_REQUEST, ex.getMessage());
 		}
 		if (photos.countBySpot(spotId) >= MAX_PHOTOS_PER_SPOT) {
 			throw new ResponseStatusException(HttpStatus.CONFLICT,

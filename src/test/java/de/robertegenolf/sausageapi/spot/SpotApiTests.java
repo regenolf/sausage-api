@@ -12,6 +12,10 @@ import org.springframework.jdbc.core.simple.JdbcClient;
 import org.springframework.mock.web.MockMultipartFile;
 import org.springframework.test.web.servlet.MockMvc;
 
+import javax.imageio.ImageIO;
+import java.awt.image.BufferedImage;
+import java.io.ByteArrayOutputStream;
+import java.util.Arrays;
 import java.util.UUID;
 
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.delete;
@@ -446,7 +450,10 @@ class SpotApiTests {
 		register(owner);
 		register(other);
 		long spotId = createSpot(owner, "Foto " + owner);
-		byte[] png = {(byte) 0x89, 'P', 'N', 'G', 0x0D, 0x0A, 0x1A, 0x0A, 0, 0, 0, 0x0D};
+		BufferedImage image = new BufferedImage(4, 4, BufferedImage.TYPE_INT_RGB);
+		ByteArrayOutputStream buffer = new ByteArrayOutputStream();
+		ImageIO.write(image, "png", buffer);
+		byte[] png = buffer.toByteArray();
 
 		mvc.perform(multipart("/api/spots/" + spotId + "/photos")
 						.file(new MockMultipartFile("file", "bild.png", "image/png", png)))
@@ -454,6 +461,9 @@ class SpotApiTests {
 		mvc.perform(multipart("/api/spots/" + spotId + "/photos").with(httpBasic(owner, PASSWORD))
 						.file(new MockMultipartFile("file", "boese.png", "image/png", "<script>".getBytes())))
 				.andExpect(status().isUnsupportedMediaType());
+		mvc.perform(multipart("/api/spots/" + spotId + "/photos").with(httpBasic(owner, PASSWORD))
+						.file(new MockMultipartFile("file", "kaputt.png", "image/png", Arrays.copyOf(png, 12))))
+				.andExpect(status().isBadRequest());
 
 		String location = mvc.perform(multipart("/api/spots/" + spotId + "/photos").with(httpBasic(owner, PASSWORD))
 						.file(new MockMultipartFile("file", "bild.bin", "application/octet-stream", png)))

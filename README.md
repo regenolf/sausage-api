@@ -72,7 +72,7 @@ Passwortänderung bis zum Ablauf.
 | `DELETE` | `/api/spots/{id}/ratings/me` | Eigene Bewertung zurücknehmen 🔒 |
 | `GET` | `/api/spots/{id}/photos` | Fotos eines Spots (Metadaten mit `url`) |
 | `GET` | `/api/spots/{id}/photos/{photoId}` | Das Bild selbst |
-| `POST` | `/api/spots/{id}/photos` | Foto hochladen (multipart, Feld `file`, JPEG/PNG/WebP, max. 5 MB, max. 20 je Spot) 🔒 |
+| `POST` | `/api/spots/{id}/photos` | Foto hochladen (multipart, Feld `file`, JPEG/PNG/WebP, max. 5 MB, max. 20 je Spot; EXIF/GPS-Metadaten werden entfernt) 🔒 |
 | `DELETE` | `/api/spots/{id}/photos/{photoId}` | Foto löschen 🔒 (Hochladender oder Admin) |
 | `GET` | `/api/spots/{id}/comments` | Kommentare (neueste zuerst, mit Benutzername) |
 | `POST` | `/api/spots/{id}/comments` | Kommentieren 🔒 |
