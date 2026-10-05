@@ -57,6 +57,7 @@ Passwortänderung bis zum Ablauf.
 | `POST` | `/api/auth/token` | JWT holen (mit Basic Auth oder gültigem Token) 🔒 |
 | `GET` | `/api/users/me` | Eigenes Profil 🔒 |
 | `GET` | `/api/users/me/spots` | Eigene Spots, neueste zuerst 🔒 |
+| `DELETE` | `/api/users/me` | Account löschen (Body `{"password":…}`): Bewertungen, Kommentare, Fotos werden gelöscht, eigene Spots anonymisiert 🔒 |
 | `PUT` | `/api/users/me/password` | Passwort ändern (`currentPassword`, `newPassword`) 🔒 |
 | `GET` | `/api/categories` | Alle Kategorien |
 | `POST` | `/api/categories` | Kategorie anlegen 🔒 (nur Admin) |

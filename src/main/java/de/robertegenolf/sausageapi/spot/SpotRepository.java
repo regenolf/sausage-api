@@ -29,7 +29,7 @@ class SpotRepository {
 			       COUNT(r.id) AS rating_count
 			FROM spot s
 			JOIN category c ON c.id = s.category_id
-			JOIN app_user u ON u.id = s.created_by
+			LEFT JOIN app_user u ON u.id = s.created_by
 			LEFT JOIN rating r ON r.spot_id = s.id
 			""";
 
@@ -195,16 +195,24 @@ class SpotRepository {
 				.update();
 	}
 
-	/** Liefert die User-ID des Erstellers, leer wenn es den Spot nicht gibt. */
+	/**
+	 * Liefert die User-ID des Erstellers, leer wenn es den Spot nicht gibt. Spots gelöschter
+	 * Accounts liefern {@link #NO_OWNER}, das zu keinem User passt.
+	 */
 	Optional<Long> findSpotOwner(long spotId) {
-		return jdbc.sql("SELECT created_by FROM spot WHERE id = :id")
+		return jdbc.sql("SELECT COALESCE(created_by, " + NO_OWNER + ") FROM spot WHERE id = :id")
 				.param("id", spotId)
 				.query(Long.class)
 				.optional();
 	}
 
+	static final long NO_OWNER = -1;
+
 	boolean spotExists(long spotId) {
-		return findSpotOwner(spotId).isPresent();
+		return jdbc.sql("SELECT EXISTS (SELECT 1 FROM spot WHERE id = :id)")
+				.param("id", spotId)
+				.query(Boolean.class)
+				.single();
 	}
 
 	void upsertRating(long spotId, long userId, int score) {

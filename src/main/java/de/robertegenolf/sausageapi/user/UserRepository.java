@@ -44,6 +44,12 @@ public class UserRepository {
 				.update();
 	}
 
+	void delete(long id) {
+		jdbc.sql("DELETE FROM app_user WHERE id = :id")
+				.param("id", id)
+				.update();
+	}
+
 	long create(String username, String email, String passwordHash) {
 		return jdbc.sql("""
 				INSERT INTO app_user (username, email, password_hash)

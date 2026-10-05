@@ -9,6 +9,7 @@ import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
 import org.springframework.security.core.Authentication;
 import org.springframework.security.crypto.password.PasswordEncoder;
+import org.springframework.web.bind.annotation.DeleteMapping;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.PutMapping;
@@ -30,6 +31,9 @@ class UserController {
 	}
 
 	public record RegisteredUser(long id, String username) {
+	}
+
+	public record DeleteAccountRequest(@NotBlank String password) {
 	}
 
 	public record ChangePasswordRequest(
@@ -72,6 +76,21 @@ class UserController {
 			throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "Aktuelles Passwort ist falsch");
 		}
 		repository.updatePasswordHash(user.id(), passwordEncoder.encode(request.newPassword()));
+		return ResponseEntity.noContent().build();
+	}
+
+	/**
+	 * Löscht den eigenen Account samt Bewertungen, Kommentaren und Fotos. Angelegte Spots bleiben
+	 * erhalten, verlieren aber den Bezug zum Account. Zur Sicherheit muss das Passwort bestätigt werden.
+	 */
+	@DeleteMapping("/me")
+	ResponseEntity<Void> deleteAccount(@Valid @RequestBody DeleteAccountRequest request, Authentication auth) {
+		UserRepository.StoredUser user = repository.findByUsername(auth.getName())
+				.orElseThrow(() -> new ResponseStatusException(HttpStatus.UNAUTHORIZED));
+		if (!passwordEncoder.matches(request.password(), user.passwordHash())) {
+			throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "Passwort ist falsch");
+		}
+		repository.delete(user.id());
 		return ResponseEntity.noContent().build();
 	}
 }

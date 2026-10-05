@@ -488,6 +488,46 @@ class SpotApiTests {
 				.andExpect(status().isNotFound());
 	}
 
+	@Test
+	void accountLoeschenEntferntPersoenlicheDatenUndAnonymisiertSpots() throws Exception {
+		String leaver = newName();
+		String other = newName();
+		register(leaver);
+		register(other);
+		long ownSpot = createSpot(leaver, "Bleibt " + leaver);
+		long otherSpot = createSpot(other, "Fremd " + other);
+		mvc.perform(post("/api/spots/" + otherSpot + "/ratings").with(httpBasic(leaver, PASSWORD))
+				.contentType(MediaType.APPLICATION_JSON).content("{\"score\":1}"));
+		mvc.perform(post("/api/spots/" + otherSpot + "/comments").with(httpBasic(leaver, PASSWORD))
+				.contentType(MediaType.APPLICATION_JSON).content("{\"text\":\"Persönlich\"}"));
+		String jwt = token(leaver);
+
+		mvc.perform(delete("/api/users/me").with(httpBasic(leaver, PASSWORD))
+						.contentType(MediaType.APPLICATION_JSON).content("{\"password\":\"falsch\"}"))
+				.andExpect(status().isBadRequest());
+		mvc.perform(delete("/api/users/me").with(httpBasic(leaver, PASSWORD))
+						.contentType(MediaType.APPLICATION_JSON).content("{\"password\":\"" + PASSWORD + "\"}"))
+				.andExpect(status().isNoContent());
+
+		mvc.perform(get("/api/users/me").with(httpBasic(leaver, PASSWORD)))
+				.andExpect(status().isUnauthorized());
+		mvc.perform(get("/api/users/me").header("Authorization", "Bearer " + jwt))
+				.andExpect(status().isUnauthorized());
+		mvc.perform(get("/api/spots/" + otherSpot))
+				.andExpect(jsonPath("$.ratingCount").value(0));
+		mvc.perform(get("/api/spots/" + otherSpot + "/comments"))
+				.andExpect(jsonPath("$").isEmpty());
+		mvc.perform(get("/api/spots/" + ownSpot))
+				.andExpect(status().isOk())
+				.andExpect(jsonPath("$.createdBy").doesNotExist());
+
+		// Der Name ist wieder frei
+		register(leaver);
+		mvc.perform(put("/api/spots/" + ownSpot).with(httpBasic(leaver, PASSWORD))
+						.contentType(MediaType.APPLICATION_JSON).content(spotJson("Übernahme", 50.9, 6.9)))
+				.andExpect(status().isForbidden());
+	}
+
 	private String token(String username) throws Exception {
 		String json = mvc.perform(post("/api/auth/token").with(httpBasic(username, PASSWORD)))
 				.andExpect(status().isOk())
