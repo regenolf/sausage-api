@@ -88,7 +88,7 @@ sofort ungültig, ebenso ein gesperrter oder gelöschter Account. Rollenänderun
 | Methode | Pfad | Beschreibung |
 |---|---|---|
 | `POST` | `/api/users` | Registrieren (`username`, `email`, `password`, `acceptTerms: true`) |
-| `POST` | `/api/auth/register` | Registrieren und direkt anmelden (`email`, `password`, `acceptTerms: true` = Nutzungsbedingungen akzeptiert und mindestens 16 Jahre, `displayName` 3–50 Zeichen: Buchstaben, Ziffern, Leerzeichen, `.`, `_`, `-`; reservierte Namen wie „Admin“ sind gesperrt) → Token |
+| `POST` | `/api/auth/register` | Registrieren und direkt anmelden (`email`, `password`, `acceptTerms: true` = Nutzungsbedingungen akzeptiert und mindestens 16 Jahre – noch optional, bis die App es mitschickt –, `displayName` 3–50 Zeichen: Buchstaben, Ziffern, Leerzeichen, `.`, `_`, `-`; reservierte Namen wie „Admin“ sind gesperrt) → Token |
 | `POST` | `/api/auth/login` | Anmelden (`email` oder Benutzername, `password`) → Token |
 | `POST` | `/api/auth/token` | JWT holen bzw. verlängern (mit Basic Auth oder gültigem Token) 🔒 |
 | `POST` | `/api/auth/logout-all` | Auf allen Geräten abmelden (alle Tokens ungültig) 🔒 |

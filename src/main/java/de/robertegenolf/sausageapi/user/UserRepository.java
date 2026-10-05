@@ -126,11 +126,12 @@ public class UserRepository {
 				.update();
 	}
 
-	/** Legt einen Account an; {@code termsVersion} ist die bei der Registrierung akzeptierte Version der Nutzungsbedingungen. */
+	/** Legt einen Account an; {@code termsVersion} ist die akzeptierte Version der Nutzungsbedingungen (null = nicht akzeptiert). */
 	public long create(String username, String email, String passwordHash, String termsVersion) {
 		return jdbc.sql("""
 				INSERT INTO app_user (username, email, password_hash, terms_version, terms_accepted_at)
-				VALUES (:username, :email, :passwordHash, :termsVersion, CURRENT_TIMESTAMP)
+				VALUES (:username, :email, :passwordHash, CAST(:termsVersion AS varchar),
+				        CASE WHEN CAST(:termsVersion AS varchar) IS NULL THEN NULL ELSE CURRENT_TIMESTAMP END)
 				RETURNING id
 				""")
 				.param("username", username)

@@ -6,7 +6,6 @@ import jakarta.validation.Valid;
 import jakarta.validation.constraints.AssertTrue;
 import jakarta.validation.constraints.Email;
 import jakarta.validation.constraints.NotBlank;
-import jakarta.validation.constraints.NotNull;
 import jakarta.validation.constraints.Pattern;
 import jakarta.validation.constraints.Size;
 import org.springframework.beans.factory.annotation.Value;
@@ -41,9 +40,11 @@ class TokenController {
 			@NotBlank @Size(min = 8, max = 100) String password,
 			@NotBlank @Size(min = 3, max = 50) @Pattern(regexp = UserRepository.USERNAME_PATTERN,
 					message = UserRepository.USERNAME_MESSAGE) String displayName,
-			/** Nutzungsbedingungen akzeptiert und Mindestalter (16) bestätigt. */
-			@NotNull(message = UserRepository.TERMS_MESSAGE) @AssertTrue(message = UserRepository.TERMS_MESSAGE)
-			Boolean acceptTerms) {
+			/**
+			 * Nutzungsbedingungen akzeptiert und Mindestalter (16) bestätigt. Noch optional, bis die App das Feld
+			 * mitschickt; danach mit @NotNull zur Pflicht machen. {@code false} wird abgelehnt.
+			 */
+			@AssertTrue(message = UserRepository.TERMS_MESSAGE) Boolean acceptTerms) {
 	}
 
 	private final TokenService tokens;
@@ -107,7 +108,7 @@ class TokenController {
 		}
 		try {
 			long id = users.create(username, request.email().trim(), passwordEncoder.encode(request.password()),
-					termsVersion);
+					Boolean.TRUE.equals(request.acceptTerms()) ? termsVersion : null);
 			UserRepository.StoredUser user = users.findByUsername(username).orElseThrow();
 			return ResponseEntity.created(URI.create("/api/users/" + id)).body(TokenService.TokenResponse.of(tokens.issue(user)));
 		}

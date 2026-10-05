@@ -891,7 +891,8 @@ class SpotApiTests {
 
 	@Test
 	void registrierungVerlangtZustimmungZuNutzungsbedingungen() throws Exception {
-		for (String terms : new String[] {"", ",\"acceptTerms\":false"}) {
+		// ausdrücklich abgelehnt -> 400 (fehlt das Feld, wird nur keine Zustimmung gespeichert, siehe unten)
+		for (String terms : new String[] {",\"acceptTerms\":false"}) {
 			String name = newName();
 			mvc.perform(post("/api/auth/register").contentType(MediaType.APPLICATION_JSON)
 							.content("{\"email\":\"%s@test.de\",\"displayName\":\"%s\",\"password\":\"%s\"%s}"
@@ -904,6 +905,14 @@ class SpotApiTests {
 					.andExpect(status().isBadRequest())
 					.andExpect(jsonPath("$.errors.acceptTerms").exists());
 		}
+
+		String ohne = newName();
+		mvc.perform(post("/api/users").contentType(MediaType.APPLICATION_JSON)
+						.content("{\"username\":\"%s\",\"email\":\"%s@test.de\",\"password\":\"%s\"}".formatted(ohne, ohne, PASSWORD)))
+				.andExpect(status().isCreated());
+		mvc.perform(get("/api/users/me").with(httpBasic(ohne, PASSWORD)))
+				.andExpect(jsonPath("$.termsVersion").doesNotExist())
+				.andExpect(jsonPath("$.termsAcceptedAt").doesNotExist());
 
 		String username = newName();
 		register(username);
