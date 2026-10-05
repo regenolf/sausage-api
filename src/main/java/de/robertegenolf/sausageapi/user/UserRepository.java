@@ -3,12 +3,16 @@ package de.robertegenolf.sausageapi.user;
 import org.springframework.jdbc.core.simple.JdbcClient;
 import org.springframework.stereotype.Repository;
 
+import java.time.Instant;
 import java.util.Optional;
 
 @Repository
 public class UserRepository {
 
 	public record StoredUser(long id, String username, String passwordHash) {
+	}
+
+	public record UserProfile(long id, String username, String email, Instant createdAt) {
 	}
 
 	private final JdbcClient jdbc;
@@ -22,6 +26,14 @@ public class UserRepository {
 				.param("username", username)
 				.query((rs, n) -> new StoredUser(rs.getLong("id"), rs.getString("username"),
 						rs.getString("password_hash")))
+				.optional();
+	}
+
+	Optional<UserProfile> findProfile(String username) {
+		return jdbc.sql("SELECT id, username, email, created_at FROM app_user WHERE username = :username AND enabled")
+				.param("username", username)
+				.query((rs, n) -> new UserProfile(rs.getLong("id"), rs.getString("username"),
+						rs.getString("email"), rs.getTimestamp("created_at").toInstant()))
 				.optional();
 	}
 

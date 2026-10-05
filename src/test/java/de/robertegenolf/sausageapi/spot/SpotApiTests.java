@@ -9,8 +9,10 @@ import org.springframework.test.web.servlet.MockMvc;
 
 import java.util.UUID;
 
+import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.delete;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
+import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.put;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 import static org.springframework.security.test.web.servlet.request.SecurityMockMvcRequestPostProcessors.httpBasic;
@@ -22,6 +24,8 @@ import static org.springframework.security.test.web.servlet.request.SecurityMock
 @SpringBootTest
 @AutoConfigureMockMvc
 class SpotApiTests {
+
+	private static final String PASSWORD = "geheimesPasswort";
 
 	@Autowired
 	private MockMvc mvc;
@@ -82,12 +86,14 @@ class SpotApiTests {
 				.andExpect(status().isCreated());
 		mvc.perform(get("/api/spots/" + spotId + "/comments"))
 				.andExpect(status().isOk())
-				.andExpect(jsonPath("$[0].text").value("Lecker"));
+				.andExpect(jsonPath("$[0].text").value("Lecker"))
+				.andExpect(jsonPath("$[0].username").value(username));
 
 		mvc.perform(get("/api/spots/nearby").param("latitude", "50.9375").param("longitude", "6.9603")
 						.param("radiusKm", "1"))
 				.andExpect(status().isOk())
-				.andExpect(jsonPath("$[?(@.id == " + spotId + ")]").exists());
+				.andExpect(jsonPath("$[?(@.id == " + spotId + ")]").exists())
+				.andExpect(jsonPath("$[?(@.id == " + spotId + ")].distanceKm").value(0.0));
 
 		mvc.perform(get("/api/spots/nearby").param("latitude", "52.52").param("longitude", "13.405")
 						.param("radiusKm", "5"))
@@ -105,6 +111,150 @@ class SpotApiTests {
 	void unbekannterPfadLiefertNotFoundStattLogin() throws Exception {
 		mvc.perform(get("/api/gibts-nicht"))
 				.andExpect(status().isNotFound());
+	}
+
+	@Test
+	void eigenesProfilBrauchtLogin() throws Exception {
+		String username = newName();
+		register(username);
+
+		mvc.perform(get("/api/users/me"))
+				.andExpect(status().isUnauthorized());
+		mvc.perform(get("/api/users/me").with(httpBasic(username, PASSWORD)))
+				.andExpect(status().isOk())
+				.andExpect(jsonPath("$.username").value(username))
+				.andExpect(jsonPath("$.email").value(username + "@test.de"))
+				.andExpect(jsonPath("$.passwordHash").doesNotExist());
+	}
+
+	@Test
+	void nurErstellerDarfSpotBearbeitenUndLoeschen() throws Exception {
+		String owner = newName();
+		String other = newName();
+		register(owner);
+		register(other);
+		long spotId = createSpot(owner, "Bude " + owner);
+
+		mvc.perform(get("/api/spots/" + spotId))
+				.andExpect(jsonPath("$.createdBy").value(owner));
+
+		String updated = spotJson("Umbenannt " + owner, 50.94, 6.95);
+		mvc.perform(put("/api/spots/" + spotId).with(httpBasic(other, PASSWORD))
+						.contentType(MediaType.APPLICATION_JSON).content(updated))
+				.andExpect(status().isForbidden());
+		mvc.perform(put("/api/spots/" + spotId)
+						.contentType(MediaType.APPLICATION_JSON).content(updated))
+				.andExpect(status().isUnauthorized());
+		mvc.perform(put("/api/spots/" + spotId).with(httpBasic(owner, PASSWORD))
+						.contentType(MediaType.APPLICATION_JSON).content(updated))
+				.andExpect(status().isOk())
+				.andExpect(jsonPath("$.name").value("Umbenannt " + owner))
+				.andExpect(jsonPath("$.latitude").value(50.94));
+
+		// Bewertungen und Kommentare anderer User dürfen das Löschen nicht blockieren
+		mvc.perform(post("/api/spots/" + spotId + "/ratings").with(httpBasic(other, PASSWORD))
+						.contentType(MediaType.APPLICATION_JSON).content("{\"score\":5}"))
+				.andExpect(status().isNoContent());
+		mvc.perform(post("/api/spots/" + spotId + "/comments").with(httpBasic(other, PASSWORD))
+						.contentType(MediaType.APPLICATION_JSON).content("{\"text\":\"Super\"}"))
+				.andExpect(status().isCreated());
+
+		mvc.perform(delete("/api/spots/" + spotId).with(httpBasic(other, PASSWORD)))
+				.andExpect(status().isForbidden());
+		mvc.perform(delete("/api/spots/" + spotId).with(httpBasic(owner, PASSWORD)))
+				.andExpect(status().isNoContent());
+		mvc.perform(get("/api/spots/" + spotId))
+				.andExpect(status().isNotFound());
+		mvc.perform(put("/api/spots/" + spotId).with(httpBasic(owner, PASSWORD))
+						.contentType(MediaType.APPLICATION_JSON).content(updated))
+				.andExpect(status().isNotFound());
+	}
+
+	@Test
+	void eigeneBewertungLesenUndZuruecknehmen() throws Exception {
+		String username = newName();
+		register(username);
+		long spotId = createSpot(username, "Bude " + username);
+
+		mvc.perform(get("/api/spots/" + spotId + "/ratings/me"))
+				.andExpect(status().isUnauthorized());
+		mvc.perform(get("/api/spots/" + spotId + "/ratings/me").with(httpBasic(username, PASSWORD)))
+				.andExpect(status().isNotFound());
+
+		mvc.perform(post("/api/spots/" + spotId + "/ratings").with(httpBasic(username, PASSWORD))
+						.contentType(MediaType.APPLICATION_JSON).content("{\"score\":3}"))
+				.andExpect(status().isNoContent());
+		mvc.perform(get("/api/spots/" + spotId + "/ratings/me").with(httpBasic(username, PASSWORD)))
+				.andExpect(status().isOk())
+				.andExpect(jsonPath("$.score").value(3));
+
+		mvc.perform(delete("/api/spots/" + spotId + "/ratings/me").with(httpBasic(username, PASSWORD)))
+				.andExpect(status().isNoContent());
+		mvc.perform(get("/api/spots/" + spotId))
+				.andExpect(jsonPath("$.ratingCount").value(0))
+				.andExpect(jsonPath("$.averageRating").doesNotExist());
+	}
+
+	@Test
+	void nurAutorDarfKommentarLoeschen() throws Exception {
+		String author = newName();
+		String other = newName();
+		register(author);
+		register(other);
+		long spotId = createSpot(author, "Bude " + author);
+
+		String location = mvc.perform(post("/api/spots/" + spotId + "/comments").with(httpBasic(author, PASSWORD))
+						.contentType(MediaType.APPLICATION_JSON).content("{\"text\":\"Weg damit\"}"))
+				.andExpect(status().isCreated())
+				.andReturn().getResponse().getHeader("Location");
+
+		mvc.perform(delete(location).with(httpBasic(other, PASSWORD)))
+				.andExpect(status().isForbidden());
+		mvc.perform(delete(location).with(httpBasic(author, PASSWORD)))
+				.andExpect(status().isNoContent());
+		mvc.perform(delete(location).with(httpBasic(author, PASSWORD)))
+				.andExpect(status().isNotFound());
+		mvc.perform(get("/api/spots/" + spotId + "/comments"))
+				.andExpect(jsonPath("$").isEmpty());
+	}
+
+	@Test
+	void umkreissucheSortiertNachEntfernung() throws Exception {
+		String username = newName();
+		register(username);
+		// Abgelegene Koordinaten, damit andere Test-Spots nicht dazwischenfunken
+		long fern = createSpot(username, "Fern " + username, 10.02, 20.0);
+		long nah = createSpot(username, "Nah " + username, 10.001, 20.0);
+
+		mvc.perform(get("/api/spots/nearby").param("latitude", "10.0").param("longitude", "20.0")
+						.param("radiusKm", "5").param("category", "BRATWURST"))
+				.andExpect(status().isOk())
+				.andExpect(jsonPath("$[?(@.id == " + nah + ")]").exists())
+				.andExpect(jsonPath("$[?(@.id == " + fern + ")]").exists())
+				.andExpect(result -> {
+					String json = result.getResponse().getContentAsString();
+					if (json.indexOf("\"id\":" + nah + ",") > json.indexOf("\"id\":" + fern + ",")) {
+						throw new AssertionError("Näherer Spot muss zuerst kommen: " + json);
+					}
+				});
+
+		mvc.perform(get("/api/spots/nearby").param("latitude", "10.0").param("longitude", "20.0")
+						.param("radiusKm", "5").param("category", "GIBTS_NICHT"))
+				.andExpect(status().isOk())
+				.andExpect(jsonPath("$").isEmpty());
+	}
+
+	private long createSpot(String username, String name) throws Exception {
+		return createSpot(username, name, 50.9375, 6.9603);
+	}
+
+	private long createSpot(String username, String name, double lat, double lon) throws Exception {
+		String location = mvc.perform(post("/api/spots").with(httpBasic(username, PASSWORD))
+						.contentType(MediaType.APPLICATION_JSON)
+						.content(spotJson(name, lat, lon)))
+				.andExpect(status().isCreated())
+				.andReturn().getResponse().getHeader("Location");
+		return Long.parseLong(location.substring(location.lastIndexOf('/') + 1));
 	}
 
 	private void register(String username) throws Exception {

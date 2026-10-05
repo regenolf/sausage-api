@@ -2,13 +2,19 @@ package de.robertegenolf.sausageapi.spot;
 
 import de.robertegenolf.sausageapi.spot.SpotDtos.Category;
 import de.robertegenolf.sausageapi.spot.SpotDtos.Comment;
-import de.robertegenolf.sausageapi.spot.SpotDtos.CreateSpotRequest;
+import de.robertegenolf.sausageapi.spot.SpotDtos.NearbySpot;
 import de.robertegenolf.sausageapi.spot.SpotDtos.SpotDetail;
+import de.robertegenolf.sausageapi.spot.SpotDtos.SpotRequest;
 import de.robertegenolf.sausageapi.spot.SpotDtos.SpotSummary;
+import org.springframework.jdbc.core.RowMapper;
 import org.springframework.jdbc.core.simple.JdbcClient;
 import org.springframework.stereotype.Repository;
 
+import java.sql.ResultSet;
+import java.sql.SQLException;
+import java.util.HashMap;
 import java.util.List;
+import java.util.Map;
 import java.util.Optional;
 
 @Repository
@@ -17,13 +23,44 @@ class SpotRepository {
 	private static final String SPOT_SELECT = """
 			SELECT s.id, c.code AS category_code, s.name, s.description, s.street, s.house_number,
 			       s.zip_code, s.city, s.latitude, s.longitude, s.opening_hours,
-			       s.created_at, s.updated_at,
+			       u.username AS created_by, s.created_at, s.updated_at,
 			       AVG(r.score)::float8 AS average_rating,
 			       COUNT(r.id) AS rating_count
 			FROM spot s
 			JOIN category c ON c.id = s.category_id
+			JOIN app_user u ON u.id = s.created_by
 			LEFT JOIN rating r ON r.spot_id = s.id
 			""";
+
+	private static final String SPOT_GROUP_BY = "GROUP BY s.id, c.code, u.username\n";
+
+	/** Haversine-Distanz in km zwischen Spot (Tabellen-Alias als Platzhalter) und (:latitude, :longitude). */
+	private static final String DISTANCE_KM = """
+			6371 * 2 * asin(sqrt(
+			        power(sin(radians(%1$s.latitude - :latitude) / 2), 2)
+			        + cos(radians(:latitude)) * cos(radians(%1$s.latitude))
+			        * power(sin(radians(%1$s.longitude - :longitude) / 2), 2)))""";
+
+	private static final RowMapper<SpotSummary> SPOT_SUMMARY = (rs, n) -> new SpotSummary(rs.getLong("id"),
+			rs.getString("category_code"), rs.getString("name"), rs.getString("city"),
+			rs.getBigDecimal("latitude"), rs.getBigDecimal("longitude"),
+			averageRating(rs), rs.getLong("rating_count"));
+
+	private static final RowMapper<NearbySpot> NEARBY_SPOT = (rs, n) -> new NearbySpot(rs.getLong("id"),
+			rs.getString("category_code"), rs.getString("name"), rs.getString("city"),
+			rs.getBigDecimal("latitude"), rs.getBigDecimal("longitude"),
+			averageRating(rs), rs.getLong("rating_count"), rs.getDouble("distance_km"));
+
+	private static final RowMapper<SpotDetail> SPOT_DETAIL = (rs, n) -> new SpotDetail(rs.getLong("id"),
+			rs.getString("category_code"), rs.getString("name"), rs.getString("description"),
+			rs.getString("street"), rs.getString("house_number"),
+			rs.getString("zip_code"), rs.getString("city"),
+			rs.getBigDecimal("latitude"), rs.getBigDecimal("longitude"),
+			rs.getString("opening_hours"),
+			averageRating(rs), rs.getLong("rating_count"),
+			rs.getString("created_by"),
+			rs.getTimestamp("created_at").toInstant(),
+			rs.getTimestamp("updated_at").toInstant());
 
 	private final JdbcClient jdbc;
 
@@ -41,57 +78,37 @@ class SpotRepository {
 	List<SpotSummary> findSpots(String categoryCode) {
 		String sql = SPOT_SELECT + """
 				WHERE (CAST(:categoryCode AS varchar) IS NULL OR c.code = :categoryCode)
-				GROUP BY s.id, c.code
+				""" + SPOT_GROUP_BY + """
 				ORDER BY s.name
 				""";
 		return jdbc.sql(sql)
 				.param("categoryCode", categoryCode)
-				.query((rs, n) -> new SpotSummary(rs.getLong("id"), rs.getString("category_code"),
-						rs.getString("name"), rs.getString("city"),
-						rs.getBigDecimal("latitude"), rs.getBigDecimal("longitude"),
-						rs.getObject("average_rating") == null ? null : rs.getDouble("average_rating"),
-						rs.getLong("rating_count")))
+				.query(SPOT_SUMMARY)
 				.list();
 	}
 
-	List<SpotSummary> findSpotsNear(double latitude, double longitude, double radiusKm) {
-		String sql = SPOT_SELECT + """
-				WHERE 6371 * 2 * asin(sqrt(
-				        power(sin(radians(s.latitude - :latitude) / 2), 2)
-				        + cos(radians(:latitude)) * cos(radians(s.latitude))
-				        * power(sin(radians(s.longitude - :longitude) / 2), 2))) <= :radiusKm
-				GROUP BY s.id, c.code
-				ORDER BY s.name
+	List<NearbySpot> findSpotsNear(double latitude, double longitude, double radiusKm, String categoryCode) {
+		String sql = "SELECT spots.*, " + DISTANCE_KM.formatted("spots") + " AS distance_km\nFROM (\n"
+				+ SPOT_SELECT + """
+				WHERE (CAST(:categoryCode AS varchar) IS NULL OR c.code = :categoryCode)
+				  AND\s""" + DISTANCE_KM.formatted("s") + " <= :radiusKm\n" + SPOT_GROUP_BY + """
+				) spots
+				ORDER BY distance_km, name
 				""";
 		return jdbc.sql(sql)
 				.param("latitude", latitude)
 				.param("longitude", longitude)
 				.param("radiusKm", radiusKm)
-				.query((rs, n) -> new SpotSummary(rs.getLong("id"), rs.getString("category_code"),
-						rs.getString("name"), rs.getString("city"),
-						rs.getBigDecimal("latitude"), rs.getBigDecimal("longitude"),
-						rs.getObject("average_rating") == null ? null : rs.getDouble("average_rating"),
-						rs.getLong("rating_count")))
+				.param("categoryCode", categoryCode)
+				.query(NEARBY_SPOT)
 				.list();
 	}
 
 	Optional<SpotDetail> findSpot(long id) {
-		String sql = SPOT_SELECT + """
-				WHERE s.id = :id
-				GROUP BY s.id, c.code
-				""";
+		String sql = SPOT_SELECT + "WHERE s.id = :id\n" + SPOT_GROUP_BY;
 		return jdbc.sql(sql)
 				.param("id", id)
-				.query((rs, n) -> new SpotDetail(rs.getLong("id"), rs.getString("category_code"),
-						rs.getString("name"), rs.getString("description"),
-						rs.getString("street"), rs.getString("house_number"),
-						rs.getString("zip_code"), rs.getString("city"),
-						rs.getBigDecimal("latitude"), rs.getBigDecimal("longitude"),
-						rs.getString("opening_hours"),
-						rs.getObject("average_rating") == null ? null : rs.getDouble("average_rating"),
-						rs.getLong("rating_count"),
-						rs.getTimestamp("created_at").toInstant(),
-						rs.getTimestamp("updated_at").toInstant()))
+				.query(SPOT_DETAIL)
 				.optional();
 	}
 
@@ -102,7 +119,7 @@ class SpotRepository {
 				.single() > 0;
 	}
 
-	long createSpot(CreateSpotRequest r, long createdBy) {
+	long createSpot(SpotRequest r, long createdBy) {
 		return jdbc.sql("""
 				INSERT INTO spot (category_id, name, description, street, house_number, zip_code, city,
 				                  latitude, longitude, opening_hours, created_by)
@@ -110,27 +127,42 @@ class SpotRepository {
 				        :name, :description, :street, :houseNumber, :zipCode, :city,
 				        :latitude, :longitude, :openingHours, :createdBy)
 				RETURNING id
-				""")
-				.param("categoryCode", r.categoryCode())
-				.param("name", r.name())
-				.param("description", r.description())
-				.param("street", r.street())
-				.param("houseNumber", r.houseNumber())
-				.param("zipCode", r.zipCode())
-				.param("city", r.city())
-				.param("latitude", r.latitude())
-				.param("longitude", r.longitude())
-				.param("openingHours", r.openingHours())
+				""").params(spotParams(r))
 				.param("createdBy", createdBy)
 				.query(Long.class)
 				.single();
 	}
 
-	boolean spotExists(long spotId) {
-		return jdbc.sql("SELECT COUNT(*) FROM spot WHERE id = :id")
+	void updateSpot(long id, SpotRequest r) {
+		jdbc.sql("""
+				UPDATE spot SET
+				    category_id = (SELECT id FROM category WHERE code = :categoryCode),
+				    name = :name, description = :description, street = :street,
+				    house_number = :houseNumber, zip_code = :zipCode, city = :city,
+				    latitude = :latitude, longitude = :longitude, opening_hours = :openingHours,
+				    updated_at = CURRENT_TIMESTAMP
+				WHERE id = :id
+				""").params(spotParams(r))
+				.param("id", id)
+				.update();
+	}
+
+	void deleteSpot(long id) {
+		jdbc.sql("DELETE FROM spot WHERE id = :id")
+				.param("id", id)
+				.update();
+	}
+
+	/** Liefert die User-ID des Erstellers, leer wenn es den Spot nicht gibt. */
+	Optional<Long> findSpotOwner(long spotId) {
+		return jdbc.sql("SELECT created_by FROM spot WHERE id = :id")
 				.param("id", spotId)
 				.query(Long.class)
-				.single() > 0;
+				.optional();
+	}
+
+	boolean spotExists(long spotId) {
+		return findSpotOwner(spotId).isPresent();
 	}
 
 	void upsertRating(long spotId, long userId, int score) {
@@ -143,6 +175,21 @@ class SpotRepository {
 				.param("userId", userId)
 				.param("score", score)
 				.update();
+	}
+
+	Optional<Integer> findRating(long spotId, long userId) {
+		return jdbc.sql("SELECT score FROM rating WHERE spot_id = :spotId AND user_id = :userId")
+				.param("spotId", spotId)
+				.param("userId", userId)
+				.query(Integer.class)
+				.optional();
+	}
+
+	boolean deleteRating(long spotId, long userId) {
+		return jdbc.sql("DELETE FROM rating WHERE spot_id = :spotId AND user_id = :userId")
+				.param("spotId", spotId)
+				.param("userId", userId)
+				.update() > 0;
 	}
 
 	long createComment(long spotId, long userId, String text) {
@@ -160,13 +207,50 @@ class SpotRepository {
 
 	List<Comment> findComments(long spotId) {
 		return jdbc.sql("""
-				SELECT id, spot_id, user_id, text, created_at
-				FROM comment WHERE spot_id = :spotId ORDER BY created_at DESC
+				SELECT c.id, c.spot_id, c.user_id, u.username, c.text, c.created_at
+				FROM comment c
+				JOIN app_user u ON u.id = c.user_id
+				WHERE c.spot_id = :spotId
+				ORDER BY c.created_at DESC, c.id DESC
 				""")
 				.param("spotId", spotId)
 				.query((rs, n) -> new Comment(rs.getLong("id"), rs.getLong("spot_id"),
-						rs.getLong("user_id"), rs.getString("text"),
+						rs.getLong("user_id"), rs.getString("username"), rs.getString("text"),
 						rs.getTimestamp("created_at").toInstant()))
 				.list();
+	}
+
+	/** Liefert die User-ID des Autors, leer wenn es den Kommentar an diesem Spot nicht gibt. */
+	Optional<Long> findCommentAuthor(long spotId, long commentId) {
+		return jdbc.sql("SELECT user_id FROM comment WHERE id = :id AND spot_id = :spotId")
+				.param("id", commentId)
+				.param("spotId", spotId)
+				.query(Long.class)
+				.optional();
+	}
+
+	void deleteComment(long commentId) {
+		jdbc.sql("DELETE FROM comment WHERE id = :id")
+				.param("id", commentId)
+				.update();
+	}
+
+	private static Map<String, Object> spotParams(SpotRequest r) {
+		Map<String, Object> params = new HashMap<>();
+		params.put("categoryCode", r.categoryCode());
+		params.put("name", r.name());
+		params.put("description", r.description());
+		params.put("street", r.street());
+		params.put("houseNumber", r.houseNumber());
+		params.put("zipCode", r.zipCode());
+		params.put("city", r.city());
+		params.put("latitude", r.latitude());
+		params.put("longitude", r.longitude());
+		params.put("openingHours", r.openingHours());
+		return params;
+	}
+
+	private static Double averageRating(ResultSet rs) throws SQLException {
+		return rs.getObject("average_rating") == null ? null : rs.getDouble("average_rating");
 	}
 }

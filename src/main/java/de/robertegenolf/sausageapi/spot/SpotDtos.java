@@ -23,13 +23,21 @@ public final class SpotDtos {
 			BigDecimal latitude, BigDecimal longitude, Double averageRating, long ratingCount) {
 	}
 
+	public record NearbySpot(long id, String categoryCode, String name, String city,
+			BigDecimal latitude, BigDecimal longitude, Double averageRating, long ratingCount,
+			double distanceKm) {
+	}
+
 	public record SpotDetail(long id, String categoryCode, String name, String description,
 			String street, String houseNumber, String zipCode, String city,
 			BigDecimal latitude, BigDecimal longitude, String openingHours,
-			Double averageRating, long ratingCount, Instant createdAt, Instant updatedAt) {
+			Double averageRating, long ratingCount, String createdBy, Instant createdAt, Instant updatedAt) {
 	}
 
-	public record CreateSpotRequest(
+	/**
+	 * Wird für Anlegen (POST) und vollständiges Bearbeiten (PUT) eines Spots verwendet.
+	 */
+	public record SpotRequest(
 			@NotBlank String categoryCode,
 			@NotBlank @Size(max = 150) String name,
 			@Size(max = 2000) String description,
@@ -50,6 +58,6 @@ public final class SpotDtos {
 			@NotBlank @Size(max = 2000) String text) {
 	}
 
-	public record Comment(long id, long spotId, long userId, String text, Instant createdAt) {
+	public record Comment(long id, long spotId, long userId, String username, String text, Instant createdAt) {
 	}
 }
