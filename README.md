@@ -50,6 +50,7 @@ docker compose -f docker-compose.prod.yml exec -T db pg_restore -U sausage -d sa
 | `DB_URL` | `jdbc:postgresql://localhost:5432/sausage` |
 | `DB_USERNAME` / `DB_PASSWORD` | `sausage` / `sausage` |
 | `JWT_SECRET` | leer → zufälliger Schlüssel pro Start (Anmeldungen gehen bei Neustart verloren) – **in Produktion setzen** (mind. 32 Zeichen) |
+| `PUBLIC_URL` | leer (aus der Anfrage); öffentliche Adresse für absolute Foto-URLs, im Produktions-Setup `https://DOMAIN` |
 | `API_DOCS_ENABLED` | `true` (Swagger UI und `/v3/api-docs`; im Produktions-Setup `false`) |
 | `JWT_VALIDITY` | `P30D` |
 | `app.rate-limit.registrations-per-hour` | `10` Registrierungen pro IP und Stunde |

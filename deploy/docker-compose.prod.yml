@@ -44,6 +44,8 @@ services:
       # Web-App läuft unter derselben Domain (kein CORS nötig); erlaubt werden die nativen Apps
       CORS_ALLOWED_ORIGINS: capacitor://localhost,https://localhost
       API_DOCS_ENABLED: "false"
+      # Für absolute Foto-URLs (native Apps); TLS endet bei Caddy, daher nicht aus der Anfrage ableitbar
+      PUBLIC_URL: https://${DOMAIN}
     depends_on:
       db:
         condition: service_healthy

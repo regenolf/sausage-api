@@ -86,7 +86,7 @@ class PhotoController {
 		}
 		long userId = currentUserId(auth);
 		long id = photos.create(spotId, userId, contentType, data);
-		SpotPhoto created = new SpotPhoto(id, PhotoRepository.url(spotId, id), auth.getName(), contentType,
+		SpotPhoto created = new SpotPhoto(id, photos.url(spotId, id), auth.getName(), contentType,
 				data.length, Instant.now());
 		return ResponseEntity.created(URI.create(created.url())).body(created);
 	}

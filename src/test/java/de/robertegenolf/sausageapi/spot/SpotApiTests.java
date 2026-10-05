@@ -739,6 +739,79 @@ class SpotApiTests {
 				.andExpect(status().isUnauthorized());
 	}
 
+	@Test
+	void jpegUndWebpUploadEntferntMetadatenUndLimitGreift() throws Exception {
+		String owner = newName();
+		String admin = newName();
+		register(owner);
+		register(admin);
+		jdbc.sql("UPDATE app_user SET role = 'ADMIN' WHERE username = :u").param("u", admin).update();
+		long spotId = createSpot(owner, "Fotolimit " + owner);
+
+		// JPEG mit eingeschleustem EXIF-Segment (Platzhalter für GPS-Daten)
+		BufferedImage image = new BufferedImage(8, 8, BufferedImage.TYPE_INT_RGB);
+		ByteArrayOutputStream jpegOut = new ByteArrayOutputStream();
+		ImageIO.write(image, "jpg", jpegOut);
+		byte[] jpeg = jpegOut.toByteArray();
+		byte[] secret = "Exif\0\0GPS-GEHEIM-50.93".getBytes(java.nio.charset.StandardCharsets.ISO_8859_1);
+		byte[] withExif = new byte[jpeg.length + 4 + secret.length];
+		System.arraycopy(jpeg, 0, withExif, 0, 2);
+		withExif[2] = (byte) 0xFF;
+		withExif[3] = (byte) 0xE1;
+		withExif[4] = (byte) ((secret.length + 2) >> 8);
+		withExif[5] = (byte) (secret.length + 2);
+		System.arraycopy(secret, 0, withExif, 6, secret.length);
+		System.arraycopy(jpeg, 2, withExif, 6 + secret.length, jpeg.length - 2);
+
+		String jpegUrl = JsonPath.read(mvc.perform(multipart("/api/spots/" + spotId + "/photos").with(httpBasic(owner, PASSWORD))
+						.file(new MockMultipartFile("file", "handy.jpg", "image/jpeg", withExif)))
+				.andExpect(status().isCreated())
+				.andExpect(jsonPath("$.contentType").value("image/jpeg"))
+				.andExpect(jsonPath("$.url").value(org.hamcrest.Matchers.startsWith("http://localhost/api/spots/")))
+				.andReturn().getResponse().getContentAsString(), "$.url");
+		byte[] served = mvc.perform(get(jpegUrl)).andExpect(status().isOk()).andReturn().getResponse().getContentAsByteArray();
+		org.assertj.core.api.Assertions.assertThat(new String(served, java.nio.charset.StandardCharsets.ISO_8859_1))
+				.doesNotContain("GPS-GEHEIM");
+		org.assertj.core.api.Assertions.assertThat(ImageIO.read(new java.io.ByteArrayInputStream(served))).isNotNull();
+
+		// WebP mit EXIF-Chunk
+		byte[] exifChunk = "EXIF\u0008\0\0\0GPS-WEBP".getBytes(java.nio.charset.StandardCharsets.ISO_8859_1);
+		byte[] vp8l = {'V', 'P', '8', 'L', 4, 0, 0, 0, 0x2F, 0, 0, 0};
+		byte[] webp = new byte[12 + vp8l.length + exifChunk.length];
+		System.arraycopy("RIFF".getBytes(), 0, webp, 0, 4);
+		int riffSize = webp.length - 8;
+		webp[4] = (byte) riffSize;
+		webp[5] = (byte) (riffSize >> 8);
+		System.arraycopy("WEBP".getBytes(), 0, webp, 8, 4);
+		System.arraycopy(vp8l, 0, webp, 12, vp8l.length);
+		System.arraycopy(exifChunk, 0, webp, 12 + vp8l.length, exifChunk.length);
+		String webpUrl = JsonPath.read(mvc.perform(multipart("/api/spots/" + spotId + "/photos").with(httpBasic(owner, PASSWORD))
+						.file(new MockMultipartFile("file", "bild.webp", "image/webp", webp)))
+				.andExpect(status().isCreated())
+				.andExpect(jsonPath("$.contentType").value("image/webp"))
+				.andReturn().getResponse().getContentAsString(), "$.url");
+		byte[] servedWebp = mvc.perform(get(webpUrl)).andReturn().getResponse().getContentAsByteArray();
+		org.assertj.core.api.Assertions.assertThat(new String(servedWebp, java.nio.charset.StandardCharsets.ISO_8859_1))
+				.doesNotContain("GPS-WEBP").startsWith("RIFF");
+
+		// Admin darf fremde Fotos löschen
+		mvc.perform(delete(webpUrl).with(httpBasic(admin, PASSWORD))).andExpect(status().isNoContent());
+
+		// Limit: höchstens 20 Fotos je Spot
+		BufferedImage tiny = new BufferedImage(2, 2, BufferedImage.TYPE_INT_RGB);
+		ByteArrayOutputStream pngOut = new ByteArrayOutputStream();
+		ImageIO.write(tiny, "png", pngOut);
+		for (int i = 1; i < 20; i++) {
+			mvc.perform(multipart("/api/spots/" + spotId + "/photos").with(httpBasic(owner, PASSWORD))
+							.file(new MockMultipartFile("file", "p.png", "image/png", pngOut.toByteArray())))
+					.andExpect(status().isCreated());
+		}
+		mvc.perform(multipart("/api/spots/" + spotId + "/photos").with(httpBasic(owner, PASSWORD))
+						.file(new MockMultipartFile("file", "p.png", "image/png", pngOut.toByteArray())))
+				.andExpect(status().isConflict());
+		mvc.perform(get("/api/spots/" + spotId)).andExpect(jsonPath("$.photos.length()").value(20));
+	}
+
 	private String token(String username) throws Exception {
 		String json = mvc.perform(post("/api/auth/token").with(httpBasic(username, PASSWORD)))
 				.andExpect(status().isOk())

@@ -1,7 +1,10 @@
 package de.robertegenolf.sausageapi.spot;
 
 import de.robertegenolf.sausageapi.spot.SpotDtos.SpotPhoto;
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.jdbc.core.simple.JdbcClient;
+import org.springframework.web.context.request.RequestContextHolder;
+import org.springframework.web.servlet.support.ServletUriComponentsBuilder;
 import org.springframework.stereotype.Repository;
 
 import java.util.List;
@@ -14,9 +17,11 @@ class PhotoRepository {
 	}
 
 	private final JdbcClient jdbc;
+	private final String publicUrl;
 
-	PhotoRepository(JdbcClient jdbc) {
+	PhotoRepository(JdbcClient jdbc, @Value("${app.public-url:}") String publicUrl) {
 		this.jdbc = jdbc;
+		this.publicUrl = publicUrl;
 	}
 
 	long create(long spotId, long userId, String contentType, byte[] data) {
@@ -73,8 +78,20 @@ class PhotoRepository {
 				.single();
 	}
 
-	static String url(long spotId, long photoId) {
-		return "/api/spots/" + spotId + "/photos/" + photoId;
+	/**
+	 * Absolute URL des Bildes (z. B. https://wurst.example.de/api/spots/1/photos/2), damit es auch in den nativen
+	 * Apps lädt, deren Seite nicht unter der API-Domain läuft. Basis ist {@code app.public-url}; ohne Konfiguration
+	 * Schema und Host der Anfrage (hinter einem Proxy aus X-Forwarded-Proto/-Host), ohne laufende Anfrage relativ.
+	 */
+	String url(long spotId, long photoId) {
+		String path = "/api/spots/" + spotId + "/photos/" + photoId;
+		if (!publicUrl.isBlank()) {
+			return publicUrl.replaceAll("/+$", "") + path;
+		}
+		if (RequestContextHolder.getRequestAttributes() == null) {
+			return path;
+		}
+		return ServletUriComponentsBuilder.fromCurrentContextPath().path(path).toUriString();
 	}
 
 	void delete(long photoId) {
