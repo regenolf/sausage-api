@@ -7,8 +7,9 @@ services:
       POSTGRES_DB: sausage
       POSTGRES_USER: sausage
       POSTGRES_PASSWORD: sausage
+    # Nur für die lokale Entwicklung (Standard-Passwort!): Port nur auf diesem Rechner erreichbar
     ports:
-      - "5432:5432"
+      - "127.0.0.1:5432:5432"
     volumes:
       - sausage-pg-data:/var/lib/postgresql/data
     healthcheck:
@@ -30,7 +31,7 @@ services:
       DB_USERNAME: sausage
       DB_PASSWORD: sausage
     ports:
-      - "8080:8080"
+      - "127.0.0.1:8080:8080"
 
 volumes:
   sausage-pg-data:

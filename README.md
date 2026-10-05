@@ -56,6 +56,8 @@ docker compose -f docker-compose.prod.yml exec -T db pg_restore -U sausage -d sa
 | `app.rate-limit.registrations-per-hour` | `10` Registrierungen pro IP und Stunde |
 | `app.rate-limit.failed-logins-per-15-minutes` | `10` Fehlversuche pro IP und Account, danach 429 bis zum Fensterende |
 | `app.rate-limit.failed-logins-per-ip-per-15-minutes` | `100` Fehlversuche pro IP über alle Accounts |
+| `app.rate-limit.writes-per-hour` | `200` Schreibzugriffe (Anlegen/Ändern/Löschen) pro User und Stunde |
+| `app.rate-limit.reports-per-hour` | `30` Meldungen pro IP und Stunde |
 | `CORS_ALLOWED_ORIGINS` | `http://localhost:8100,http://localhost:4200,capacitor://localhost,https://localhost,http://localhost:3000,http://localhost:5173` |
 
 API-Doku (Swagger UI): http://localhost:8080/swagger-ui.html

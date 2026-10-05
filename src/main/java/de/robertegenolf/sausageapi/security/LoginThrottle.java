@@ -42,18 +42,21 @@ public class LoginThrottle {
 	private final FixedWindowRateLimiter failedPerIp;
 	private final FixedWindowRateLimiter registrations;
 	private final FixedWindowRateLimiter reports;
+	private final FixedWindowRateLimiter writes;
 
 	LoginThrottle(@Value("${app.rate-limit.enabled:true}") boolean enabled,
 			@Value("${app.rate-limit.failed-logins-per-15-minutes:10}") int failedPerAccount,
 			@Value("${app.rate-limit.failed-logins-per-ip-per-15-minutes:100}") int failedPerIp,
 			@Value("${app.rate-limit.registrations-per-hour:10}") int registrationsPerHour,
-			@Value("${app.rate-limit.reports-per-hour:30}") int reportsPerHour) {
+			@Value("${app.rate-limit.reports-per-hour:30}") int reportsPerHour,
+			@Value("${app.rate-limit.writes-per-hour:200}") int writesPerHour) {
 		this.enabled = enabled;
 		Clock clock = Clock.systemUTC();
 		this.failedPerAccount = new FixedWindowRateLimiter(failedPerAccount, Duration.ofMinutes(15), clock);
 		this.failedPerIp = new FixedWindowRateLimiter(failedPerIp, Duration.ofMinutes(15), clock);
 		this.registrations = new FixedWindowRateLimiter(registrationsPerHour, Duration.ofHours(1), clock);
 		this.reports = new FixedWindowRateLimiter(reportsPerHour, Duration.ofHours(1), clock);
+		this.writes = new FixedWindowRateLimiter(writesPerHour, Duration.ofHours(1), clock);
 	}
 
 	/** Wirft 429, wenn für diese IP und diesen Account zu viele Fehlversuche vorliegen. */
@@ -90,6 +93,14 @@ public class LoginThrottle {
 		if (enabled && !reports.tryAcquire(ip)) {
 			throw new TooManyRequestsException("Zu viele Meldungen. Bitte später erneut versuchen.",
 					reports.secondsUntilReset(ip));
+		}
+	}
+
+	/** Zählt einen Schreibzugriff (Anlegen/Ändern/Löschen) eines angemeldeten Users; gegen Spam und DB-Aufblähung. */
+	public void checkWrite(String username) {
+		if (enabled && !writes.tryAcquire(username)) {
+			throw new TooManyRequestsException("Zu viele Änderungen in kurzer Zeit. Bitte später erneut versuchen.",
+					writes.secondsUntilReset(username));
 		}
 	}
 

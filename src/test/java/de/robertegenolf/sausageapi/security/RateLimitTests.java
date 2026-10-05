@@ -20,7 +20,7 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
 @SpringBootTest(properties = {"app.rate-limit.registrations-per-hour=2",
-		"app.rate-limit.failed-logins-per-15-minutes=3"})
+		"app.rate-limit.failed-logins-per-15-minutes=3", "app.rate-limit.writes-per-hour=3"})
 @AutoConfigureMockMvc
 @Import(TestcontainersConfiguration.class)
 class RateLimitTests {
@@ -131,6 +131,28 @@ class RateLimitTests {
 						.contentType(MediaType.APPLICATION_JSON).content(body))
 				.andExpect(status().isTooManyRequests())
 				.andExpect(header().string("Access-Control-Allow-Origin", "capacitor://localhost"));
+	}
+
+	@Test
+	void schreibzugriffeProUserBegrenzt() throws Exception {
+		String user = "rl" + UUID.randomUUID().toString().substring(0, 8);
+		mvc.perform(post("/api/users").with(ip("10.0.6.1")).contentType(MediaType.APPLICATION_JSON)
+						.content("{\"username\":\"%s\",\"email\":\"%s@test.de\",\"password\":\"geheimesPasswort\"}"
+								.formatted(user, user)))
+				.andExpect(status().isCreated());
+		String spot = "{\"categoryCode\":\"BRATWURST\",\"name\":\"Spam\",\"latitude\":1,\"longitude\":1}";
+		for (int i = 0; i < 3; i++) {
+			mvc.perform(post("/api/spots").with(httpBasic(user, "geheimesPasswort")).header("Origin", "capacitor://localhost")
+							.contentType(MediaType.APPLICATION_JSON).content(spot))
+					.andExpect(status().isCreated());
+		}
+		mvc.perform(post("/api/spots").with(httpBasic(user, "geheimesPasswort")).header("Origin", "capacitor://localhost")
+						.contentType(MediaType.APPLICATION_JSON).content(spot))
+				.andExpect(status().isTooManyRequests())
+				.andExpect(header().exists("Retry-After"))
+				.andExpect(header().string("Access-Control-Allow-Origin", "capacitor://localhost"));
+		// Lesen geht weiter
+		mvc.perform(get("/api/users/me").with(httpBasic(user, "geheimesPasswort"))).andExpect(status().isOk());
 	}
 
 	private static org.springframework.test.web.servlet.RequestBuilder register(RequestPostProcessor ip) {

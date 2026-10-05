@@ -15,6 +15,7 @@ import org.springframework.security.core.userdetails.UsernameNotFoundException;
 import org.springframework.security.crypto.bcrypt.BCryptPasswordEncoder;
 import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.security.web.SecurityFilterChain;
+import org.springframework.security.web.access.intercept.AuthorizationFilter;
 import org.springframework.web.cors.CorsConfiguration;
 import org.springframework.web.filter.CorsFilter;
 import org.springframework.web.cors.CorsConfigurationSource;
@@ -45,7 +46,8 @@ class SecurityConfig {
 				.httpBasic(basic -> {
 				})
 				.oauth2ResourceServer(oauth -> oauth.jwt(jwt -> jwt.jwtAuthenticationConverter(jwtConverter)))
-				.addFilterAfter(new BasicAuthThrottleFilter(loginThrottle), CorsFilter.class);
+				.addFilterAfter(new BasicAuthThrottleFilter(loginThrottle), CorsFilter.class)
+				.addFilterBefore(new WriteThrottleFilter(loginThrottle), AuthorizationFilter.class);
 		return http.build();
 	}
 

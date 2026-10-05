@@ -23,7 +23,7 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 /** Melde- und Abhilfeverfahren (DSA Art. 16) und Admin-Moderation. */
 @SpringBootTest(properties = {"app.rate-limit.registrations-per-hour=10000",
 		"app.rate-limit.failed-logins-per-15-minutes=10000",
-		"app.rate-limit.failed-logins-per-ip-per-15-minutes=10000"})
+		"app.rate-limit.failed-logins-per-ip-per-15-minutes=10000", "app.rate-limit.writes-per-hour=10000"})
 @AutoConfigureMockMvc
 @Import(TestcontainersConfiguration.class)
 class ModerationTests {

@@ -7,8 +7,16 @@
 # Erwartet sausage-app neben sausage-api ausgecheckt (sonst APP_SOURCE in .env anpassen).
 name: sausage
 
+# Container-Logs begrenzen (Standard wäre unbegrenzt) – gilt für alle Dienste
+x-logging: &logging
+  driver: json-file
+  options:
+    max-size: "10m"
+    max-file: "5"
+
 services:
   caddy:
+    logging: *logging
     image: caddy:2-alpine
     restart: unless-stopped
     ports:
@@ -25,6 +33,7 @@ services:
       - app
 
   app:
+    logging: *logging
     build: ${APP_SOURCE:-../../sausage-app}
     restart: unless-stopped
     environment:
@@ -34,6 +43,7 @@ services:
         condition: service_healthy
 
   api:
+    logging: *logging
     build: ..
     restart: unless-stopped
     environment:
@@ -44,6 +54,8 @@ services:
       # Web-App läuft unter derselben Domain (kein CORS nötig); erlaubt werden die nativen Apps
       CORS_ALLOWED_ORIGINS: capacitor://localhost,https://localhost
       API_DOCS_ENABLED: "false"
+      # Logs als JSON (ECS) für Log-Sammler wie Loki/Elastic
+      LOGGING_STRUCTURED_FORMAT_CONSOLE: ecs
       # Für absolute Foto-URLs (native Apps); TLS endet bei Caddy, daher nicht aus der Anfrage ableitbar
       PUBLIC_URL: https://${DOMAIN}
     depends_on:
@@ -51,6 +63,7 @@ services:
         condition: service_healthy
 
   db:
+    logging: *logging
     image: postgres:17
     restart: unless-stopped
     environment:
@@ -67,6 +80,7 @@ services:
 
   # Tägliches pg_dump nach ./backups (auf dem Host; von dort zusätzlich extern sichern!)
   backup:
+    logging: *logging
     image: postgres:17
     restart: unless-stopped
     environment:
