@@ -73,6 +73,14 @@ public class UserRepository {
 				.update();
 	}
 
+	/** Sperrt/entsperrt einen Account; alte Tokens werden dabei ungültig. Liefert false, wenn es ihn nicht gibt. */
+	public boolean setEnabled(String username, boolean enabled) {
+		return jdbc.sql("UPDATE app_user SET enabled = :enabled, token_version = token_version + 1 WHERE username = :username")
+				.param("enabled", enabled)
+				.param("username", username)
+				.update() > 0;
+	}
+
 	void delete(long id) {
 		jdbc.sql("DELETE FROM app_user WHERE id = :id")
 				.param("id", id)

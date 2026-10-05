@@ -117,6 +117,19 @@ sofort ungültig, ebenso ein gesperrter oder gelöschter Account. Rollenänderun
 Fehler kommen als [Problem Details](https://www.rfc-editor.org/rfc/rfc9457) (`application/problem+json`) mit
 deutscher Meldung in `detail`; bei Validierungsfehlern stehen die betroffenen Felder in `errors`.
 
+### Melden und Moderation (Art. 16 DSA)
+
+| Methode | Pfad | Beschreibung |
+|---|---|---|
+| `POST` | `/api/reports` | Inhalt melden (`targetType` SPOT/RATING/COMMENT/PHOTO, `targetId`, `reason` ILLEGAL/INSULT/SPAM/PRIVACY/COPYRIGHT/WRONG_INFO/OTHER, `message`; ohne Anmeldung ist `email` Pflicht) |
+| `GET` | `/api/users/me/reports` | Eigene Meldungen mit Entscheidung und Begründung 🔒 |
+| `GET` | `/api/admin/reports?status=OPEN` | Meldungen mit Vorschau des Inhalts (`OPEN`, `REMOVED`, `REJECTED`, `ALL`) 🔒 Admin |
+| `PUT` | `/api/admin/reports/{id}` | Entscheiden: `{"decision":"REMOVED"\|"REJECTED","note":"Begründung"}`; REMOVED löscht den Inhalt und erledigt alle offenen Meldungen dazu 🔒 Admin |
+| `PUT` | `/api/admin/users/{username}/status` | Account sperren/entsperren `{"enabled":false}`; Tokens werden sofort ungültig 🔒 Admin |
+
+Admins dürfen außerdem fremde Spots bearbeiten und löschen sowie Bewertungen, Kommentare und Fotos löschen.
+Noch offen: Benachrichtigung von Meldern und Betroffenen per E-Mail (braucht Mailversand).
+
 ### Admins
 
 Neue User haben die Rolle `USER`. Einen Admin ernennt man direkt in der Datenbank:

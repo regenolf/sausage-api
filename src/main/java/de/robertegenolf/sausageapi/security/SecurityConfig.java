@@ -34,7 +34,8 @@ class SecurityConfig {
 				.cors(Customizer.withDefaults())
 				.sessionManagement(session -> session.sessionCreationPolicy(SessionCreationPolicy.STATELESS))
 				.authorizeHttpRequests(auth -> auth
-						.requestMatchers(HttpMethod.POST, "/api/users", "/api/auth/login", "/api/auth/register").permitAll()
+						.requestMatchers("/api/admin/**").hasRole("ADMIN")
+						.requestMatchers(HttpMethod.POST, "/api/users", "/api/auth/login", "/api/auth/register", "/api/reports").permitAll()
 						.requestMatchers(HttpMethod.POST, "/api/categories").hasRole("ADMIN")
 						.requestMatchers(HttpMethod.GET, "/api/users/me", "/api/users/me/**", "/api/spots/*/ratings/me").authenticated()
 						.requestMatchers(HttpMethod.GET, "/api/**").permitAll()

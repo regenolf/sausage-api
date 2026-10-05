@@ -398,10 +398,12 @@ class SpotApiTests {
 						.contentType(MediaType.APPLICATION_JSON).content("{\"text\":\"Spam\"}"))
 				.andReturn().getResponse().getHeader("Location");
 
-		// Admin darf fremde Spots nicht bearbeiten, aber Kommentare und Spots löschen
+		// Admin darf fremde Spots korrigieren sowie Kommentare und Spots löschen
 		mvc.perform(put("/api/spots/" + spotId).with(httpBasic(admin, PASSWORD))
-						.contentType(MediaType.APPLICATION_JSON).content(spotJson("Admin war hier", 50.9, 6.9)))
-				.andExpect(status().isForbidden());
+						.contentType(MediaType.APPLICATION_JSON).content(spotJson("Korrigiert", 50.9, 6.9)))
+				.andExpect(status().isOk())
+				.andExpect(jsonPath("$.name").value("Korrigiert"))
+				.andExpect(jsonPath("$.createdBy").value(user));
 		mvc.perform(delete(comment).with(httpBasic(admin, PASSWORD)))
 				.andExpect(status().isNoContent());
 		mvc.perform(delete("/api/spots/" + spotId).with(httpBasic(admin, PASSWORD)))

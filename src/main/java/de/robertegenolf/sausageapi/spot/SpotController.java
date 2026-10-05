@@ -115,7 +115,13 @@ class SpotController {
 	@Transactional
 	@PutMapping("/spots/{id}")
 	SpotDetail updateSpot(@PathVariable long id, @Valid @RequestBody SpotRequest request, Authentication auth) {
-		requireSpotOwner(id, currentUserId(auth));
+		// Admins dürfen korrigieren (z. B. nach einer Meldung "falsche Angaben")
+		if (isAdmin(auth)) {
+			requireSpot(id);
+		}
+		else {
+			requireSpotOwner(id, currentUserId(auth));
+		}
 		requireCategory(request.categoryCode());
 		repository.updateSpot(id, request);
 		return detail(id);

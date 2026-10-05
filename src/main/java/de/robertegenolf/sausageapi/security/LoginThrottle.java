@@ -41,16 +41,19 @@ public class LoginThrottle {
 	private final FixedWindowRateLimiter failedPerAccount;
 	private final FixedWindowRateLimiter failedPerIp;
 	private final FixedWindowRateLimiter registrations;
+	private final FixedWindowRateLimiter reports;
 
 	LoginThrottle(@Value("${app.rate-limit.enabled:true}") boolean enabled,
 			@Value("${app.rate-limit.failed-logins-per-15-minutes:10}") int failedPerAccount,
 			@Value("${app.rate-limit.failed-logins-per-ip-per-15-minutes:100}") int failedPerIp,
-			@Value("${app.rate-limit.registrations-per-hour:10}") int registrationsPerHour) {
+			@Value("${app.rate-limit.registrations-per-hour:10}") int registrationsPerHour,
+			@Value("${app.rate-limit.reports-per-hour:30}") int reportsPerHour) {
 		this.enabled = enabled;
 		Clock clock = Clock.systemUTC();
 		this.failedPerAccount = new FixedWindowRateLimiter(failedPerAccount, Duration.ofMinutes(15), clock);
 		this.failedPerIp = new FixedWindowRateLimiter(failedPerIp, Duration.ofMinutes(15), clock);
 		this.registrations = new FixedWindowRateLimiter(registrationsPerHour, Duration.ofHours(1), clock);
+		this.reports = new FixedWindowRateLimiter(reportsPerHour, Duration.ofHours(1), clock);
 	}
 
 	/** Wirft 429, wenn für diese IP und diesen Account zu viele Fehlversuche vorliegen. */
@@ -79,6 +82,14 @@ public class LoginThrottle {
 		if (enabled && !registrations.tryAcquire(ip)) {
 			throw new TooManyRequestsException("Zu viele Registrierungen. Bitte später erneut versuchen.",
 					registrations.secondsUntilReset(ip));
+		}
+	}
+
+	/** Zählt eine Meldung und wirft 429, wenn diese IP zu viele abgegeben hat. */
+	public void checkReport(String ip) {
+		if (enabled && !reports.tryAcquire(ip)) {
+			throw new TooManyRequestsException("Zu viele Meldungen. Bitte später erneut versuchen.",
+					reports.secondsUntilReset(ip));
 		}
 	}
 
