@@ -91,6 +91,7 @@ sofort ungültig, ebenso ein gesperrter oder gelöschter Account. Rollenänderun
 | `POST` | `/api/auth/logout-all` | Auf allen Geräten abmelden (alle Tokens ungültig) 🔒 |
 | `GET` | `/api/users/me` | Eigenes Profil 🔒 |
 | `GET` | `/api/users/me/spots` | Eigene Spots, neueste zuerst 🔒 |
+| `GET` | `/api/users/me/export` | Alle eigenen Daten als JSON-Datei (Auskunft/Datenübertragbarkeit, Art. 15/20 DSGVO) 🔒 |
 | `DELETE` | `/api/users/me` | Account löschen (Body `{"password":…}`): Bewertungen, Kommentare, Fotos werden gelöscht, eigene Spots anonymisiert 🔒 |
 | `PUT` | `/api/users/me/password` | Passwort ändern (`currentPassword`, `newPassword`), meldet alle Geräte ab 🔒 |
 | `GET` | `/api/categories` | Alle Kategorien |

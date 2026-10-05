@@ -812,6 +812,37 @@ class SpotApiTests {
 		mvc.perform(get("/api/spots/" + spotId)).andExpect(jsonPath("$.photos.length()").value(20));
 	}
 
+	@Test
+	void datenexportEnthaeltAlleEigenenDaten() throws Exception {
+		String username = newName();
+		String other = newName();
+		register(username);
+		register(other);
+		long own = createSpot(username, "Export " + username);
+		long foreign = createSpot(other, "Fremd " + other);
+		mvc.perform(post("/api/spots/" + foreign + "/ratings").with(httpBasic(username, PASSWORD))
+				.contentType(MediaType.APPLICATION_JSON).content("{\"score\":4,\"comment\":\"Mein Kommentar\"}"));
+		mvc.perform(post("/api/spots/" + foreign + "/comments").with(httpBasic(username, PASSWORD))
+				.contentType(MediaType.APPLICATION_JSON).content("{\"text\":\"Mein Text\"}"));
+		mvc.perform(post("/api/spots/" + own + "/ratings").with(httpBasic(other, PASSWORD))
+				.contentType(MediaType.APPLICATION_JSON).content("{\"score\":1,\"comment\":\"Nicht von mir\"}"));
+
+		mvc.perform(get("/api/users/me/export")).andExpect(status().isUnauthorized());
+		mvc.perform(get("/api/users/me/export").with(httpBasic(username, PASSWORD)))
+				.andExpect(status().isOk())
+				.andExpect(header().string("Content-Disposition", org.hamcrest.Matchers.containsString("attachment")))
+				.andExpect(jsonPath("$.profil.username").value(username))
+				.andExpect(jsonPath("$.profil.email").value(username + "@test.de"))
+				.andExpect(jsonPath("$.profil.password_hash").doesNotExist())
+				.andExpect(jsonPath("$.spots.length()").value(1))
+				.andExpect(jsonPath("$.spots[0].name").value("Export " + username))
+				.andExpect(jsonPath("$.bewertungen.length()").value(1))
+				.andExpect(jsonPath("$.bewertungen[0].kommentar").value("Mein Kommentar"))
+				.andExpect(jsonPath("$.kommentare[0].text").value("Mein Text"))
+				.andExpect(jsonPath("$.fotos").isEmpty())
+				.andExpect(jsonPath("$.meldungen").isEmpty());
+	}
+
 	private String token(String username) throws Exception {
 		String json = mvc.perform(post("/api/auth/token").with(httpBasic(username, PASSWORD)))
 				.andExpect(status().isOk())

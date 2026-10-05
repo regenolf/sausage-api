@@ -8,6 +8,8 @@ import jakarta.validation.constraints.NotBlank;
 import jakarta.validation.constraints.Pattern;
 import jakarta.validation.constraints.Size;
 import org.springframework.dao.DuplicateKeyException;
+import org.springframework.http.ContentDisposition;
+import org.springframework.http.HttpHeaders;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
 import org.springframework.security.core.Authentication;
@@ -22,6 +24,8 @@ import org.springframework.web.bind.annotation.RestController;
 import org.springframework.web.server.ResponseStatusException;
 
 import java.net.URI;
+import java.nio.charset.StandardCharsets;
+import java.util.Map;
 
 @RestController
 @RequestMapping("/api/users")
@@ -46,11 +50,14 @@ class UserController {
 	}
 
 	private final UserRepository repository;
+	private final UserExportRepository exports;
 	private final PasswordEncoder passwordEncoder;
 	private final LoginThrottle throttle;
 
-	UserController(UserRepository repository, PasswordEncoder passwordEncoder, LoginThrottle throttle) {
+	UserController(UserRepository repository, UserExportRepository exports, PasswordEncoder passwordEncoder,
+			LoginThrottle throttle) {
 		this.repository = repository;
+		this.exports = exports;
 		this.passwordEncoder = passwordEncoder;
 		this.throttle = throttle;
 	}
@@ -99,5 +106,16 @@ class UserController {
 		}
 		repository.delete(user.id());
 		return ResponseEntity.noContent().build();
+	}
+
+	/** Alle zum eigenen Account gespeicherten Daten als JSON-Datei (Art. 15 und 20 DSGVO). */
+	@GetMapping("/me/export")
+	ResponseEntity<Map<String, Object>> export(Authentication auth) {
+		UserRepository.StoredUser user = repository.findByUsername(auth.getName())
+				.orElseThrow(() -> new ResponseStatusException(HttpStatus.UNAUTHORIZED));
+		return ResponseEntity.ok()
+				.header(HttpHeaders.CONTENT_DISPOSITION, ContentDisposition.attachment()
+						.filename("sausage-daten-" + user.username() + ".json", StandardCharsets.UTF_8).build().toString())
+				.body(exports.export(user.id()));
 	}
 }
