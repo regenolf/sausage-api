@@ -11,6 +11,8 @@ import org.springframework.jdbc.core.RowMapper;
 import org.springframework.jdbc.core.simple.JdbcClient;
 import org.springframework.stereotype.Repository;
 
+import java.math.BigDecimal;
+import java.math.RoundingMode;
 import java.sql.ResultSet;
 import java.sql.SQLException;
 import java.util.HashMap;
@@ -133,17 +135,58 @@ class SpotRepository {
 		String sql = "SELECT spots.*, " + DISTANCE_KM.formatted("spots") + " AS distance_km\nFROM (\n"
 				+ SPOT_SELECT + """
 				WHERE (CAST(:categoryCode AS varchar) IS NULL OR c.code = :categoryCode)
+				  AND s.latitude BETWEEN :minLat AND :maxLat
+				  AND s.longitude BETWEEN :minLon AND :maxLon
 				  AND\s""" + DISTANCE_KM.formatted("s") + " <= :radiusKm\n" + SPOT_GROUP_BY + """
 				) spots
 				ORDER BY distance_km, name
 				""";
+		BoundingBox box = BoundingBox.around(latitude, longitude, radiusKm);
 		return jdbc.sql(sql)
 				.param("latitude", latitude)
 				.param("longitude", longitude)
 				.param("radiusKm", radiusKm)
+				.param("minLat", box.minLat())
+				.param("maxLat", box.maxLat())
+				.param("minLon", box.minLon())
+				.param("maxLon", box.maxLon())
 				.param("categoryCode", categoryCode)
 				.query(NEARBY_SPOT)
 				.list();
+	}
+
+	/**
+	 * Rechteck, das den Suchkreis sicher enthält. Damit kann Postgres den Koordinaten-Index nutzen,
+	 * bevor die exakte Haversine-Distanz nur noch für die Kandidaten berechnet wird. Die Grenzen sind
+	 * BigDecimal, damit der Vergleich mit den DECIMAL-Spalten ohne Typumwandlung (und damit mit Index) läuft.
+	 */
+	record BoundingBox(BigDecimal minLat, BigDecimal maxLat, BigDecimal minLon, BigDecimal maxLon) {
+
+		/** Etwas weniger als die tatsächlichen ~111,2 km je Breitengrad, damit das Rechteck großzügig ist. */
+		private static final double KM_PER_DEGREE = 110.0;
+
+		static BoundingBox around(double latitude, double longitude, double radiusKm) {
+			double dLat = radiusKm / KM_PER_DEGREE;
+			double minLat = latitude - dLat;
+			double maxLat = latitude + dLat;
+			double minLon = -180;
+			double maxLon = 180;
+			if (minLat > -90 && maxLat < 90) {
+				double dLon = radiusKm / (KM_PER_DEGREE * Math.cos(Math.toRadians(Math.max(Math.abs(minLat),
+						Math.abs(maxLat)))));
+				// über die Datumsgrenze hinweg einfach nicht nach Länge filtern
+				if (longitude - dLon >= -180 && longitude + dLon <= 180) {
+					minLon = longitude - dLon;
+					maxLon = longitude + dLon;
+				}
+			}
+			return new BoundingBox(decimal(Math.max(minLat, -90)), decimal(Math.min(maxLat, 90)),
+					decimal(minLon), decimal(maxLon));
+		}
+
+		private static BigDecimal decimal(double value) {
+			return BigDecimal.valueOf(value).setScale(6, RoundingMode.HALF_UP);
+		}
 	}
 
 	Optional<SpotDetail> findSpot(long id) {

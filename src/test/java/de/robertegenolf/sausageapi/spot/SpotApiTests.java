@@ -256,6 +256,14 @@ class SpotApiTests {
 					}
 				});
 
+		// Spot 2,2 km entfernt: bei 2 km Radius nicht dabei, bei 2,5 km schon
+		mvc.perform(get("/api/spots/nearby").param("latitude", "10.0").param("longitude", "20.0")
+						.param("radiusKm", "2"))
+				.andExpect(jsonPath("$[?(@.id == " + fern + ")]").doesNotExist());
+		mvc.perform(get("/api/spots/nearby").param("latitude", "10.0").param("longitude", "20.0")
+						.param("radiusKm", "2.5"))
+				.andExpect(jsonPath("$[?(@.id == " + fern + ")]").exists());
+
 		mvc.perform(get("/api/spots/nearby").param("latitude", "10.0").param("longitude", "20.0")
 						.param("radiusKm", "5").param("category", "GIBTS_NICHT"))
 				.andExpect(status().isOk())
