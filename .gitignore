@@ -31,3 +31,10 @@ build/
 
 ### VS Code ###
 .vscode/
+
+### Deployment ###
+deploy/.env
+deploy/backups/
+
+### macOS ###
+.DS_Store

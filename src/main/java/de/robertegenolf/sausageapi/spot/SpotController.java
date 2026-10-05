@@ -1,24 +1,33 @@
 package de.robertegenolf.sausageapi.spot;
 
 import de.robertegenolf.sausageapi.spot.SpotDtos.Category;
+import de.robertegenolf.sausageapi.spot.SpotDtos.CategoryRequest;
 import de.robertegenolf.sausageapi.spot.SpotDtos.Comment;
 import de.robertegenolf.sausageapi.spot.SpotDtos.CommentRequest;
-import de.robertegenolf.sausageapi.spot.SpotDtos.CreateSpotRequest;
+import de.robertegenolf.sausageapi.spot.SpotDtos.NearbySpot;
+import de.robertegenolf.sausageapi.spot.SpotDtos.Rating;
 import de.robertegenolf.sausageapi.spot.SpotDtos.RatingRequest;
 import de.robertegenolf.sausageapi.spot.SpotDtos.SpotDetail;
+import de.robertegenolf.sausageapi.spot.SpotDtos.SpotRequest;
 import de.robertegenolf.sausageapi.spot.SpotDtos.SpotSummary;
 import de.robertegenolf.sausageapi.user.UserRepository;
 import jakarta.validation.Valid;
 import jakarta.validation.constraints.DecimalMax;
 import jakarta.validation.constraints.DecimalMin;
+import jakarta.validation.constraints.Max;
+import jakarta.validation.constraints.Min;
 import jakarta.validation.constraints.NotNull;
+import jakarta.validation.constraints.Size;
+import org.springframework.dao.DuplicateKeyException;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
 import org.springframework.security.core.Authentication;
-import org.springframework.validation.annotation.Validated;
+import org.springframework.transaction.annotation.Transactional;
+import org.springframework.web.bind.annotation.DeleteMapping;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.PostMapping;
+import org.springframework.web.bind.annotation.PutMapping;
 import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RequestParam;
@@ -28,16 +37,17 @@ import org.springframework.web.server.ResponseStatusException;
 import java.net.URI;
 import java.util.List;
 
-@Validated
 @RestController
 @RequestMapping("/api")
 class SpotController {
 
 	private final SpotRepository repository;
+	private final PhotoRepository photos;
 	private final UserRepository users;
 
-	SpotController(SpotRepository repository, UserRepository users) {
+	SpotController(SpotRepository repository, PhotoRepository photos, UserRepository users) {
 		this.repository = repository;
+		this.photos = photos;
 		this.users = users;
 	}
 
@@ -46,62 +56,205 @@ class SpotController {
 		return repository.findCategories();
 	}
 
+	@PostMapping("/categories")
+	ResponseEntity<Category> createCategory(@Valid @RequestBody CategoryRequest request) {
+		try {
+			Category created = repository.createCategory(request);
+			return ResponseEntity.created(URI.create("/api/categories/" + created.id())).body(created);
+		}
+		catch (DuplicateKeyException ex) {
+			throw new ResponseStatusException(HttpStatus.CONFLICT, "Kategorie " + request.code() + " existiert bereits");
+		}
+	}
+
+	/**
+	 * Alle Spots als Liste; mit {@code size} (und optional {@code page}) seitenweise.
+	 * Die Gesamtzahl der Treffer steht im Header {@code X-Total-Count}.
+	 */
 	@GetMapping("/spots")
-	List<SpotSummary> spots(@RequestParam(required = false) String category) {
-		return repository.findSpots(category);
+	ResponseEntity<List<SpotSummary>> spots(@RequestParam(required = false) String category,
+			@RequestParam(required = false) @Size(max = 150) String q,
+			@RequestParam(defaultValue = "0") @Min(0) int page,
+			@RequestParam(required = false) @Min(1) @Max(100) Integer size) {
+		String search = q == null || q.isBlank() ? null : q.trim();
+		List<SpotSummary> spots = size == null
+				? repository.findSpots(category, search, null, 0)
+				: repository.findSpots(category, search, size, (long) page * size);
+		return ResponseEntity.ok()
+				.header("X-Total-Count", String.valueOf(repository.countSpots(category, search)))
+				.body(spots);
+	}
+
+	@GetMapping("/users/me/spots")
+	List<SpotSummary> mySpots(Authentication auth) {
+		return repository.findSpotsByCreator(currentUserId(auth));
 	}
 
 	@GetMapping("/spots/nearby")
-	List<SpotSummary> nearby(
+	List<NearbySpot> nearby(
 			@RequestParam @NotNull @DecimalMin("-90") @DecimalMax("90") Double latitude,
 			@RequestParam @NotNull @DecimalMin("-180") @DecimalMax("180") Double longitude,
-			@RequestParam(defaultValue = "5") @DecimalMin("0.1") @DecimalMax("50") Double radiusKm) {
-		return repository.findSpotsNear(latitude, longitude, radiusKm);
+			@RequestParam(defaultValue = "5") @DecimalMin("0.1") @DecimalMax("50") Double radiusKm,
+			@RequestParam(required = false) String category) {
+		return repository.findSpotsNear(latitude, longitude, radiusKm, category);
 	}
 
 	@GetMapping("/spots/{id}")
 	SpotDetail spot(@PathVariable long id) {
-		return repository.findSpot(id)
-				.orElseThrow(() -> notFound(id));
+		return detail(id);
 	}
 
 	@PostMapping("/spots")
-	ResponseEntity<SpotDetail> createSpot(@Valid @RequestBody CreateSpotRequest request, Authentication auth) {
-		if (!repository.categoryExists(request.categoryCode())) {
-			throw new ResponseStatusException(HttpStatus.BAD_REQUEST,
-					"Unbekannte Kategorie: " + request.categoryCode());
-		}
+	ResponseEntity<SpotDetail> createSpot(@Valid @RequestBody SpotRequest request, Authentication auth) {
+		requireCategory(request.categoryCode());
 		long id = repository.createSpot(request, currentUserId(auth));
-		SpotDetail created = repository.findSpot(id).orElseThrow(() -> notFound(id));
+		SpotDetail created = detail(id);
 		return ResponseEntity.created(URI.create("/api/spots/" + id)).body(created);
 	}
 
-	@PostMapping("/spots/{id}/ratings")
-	ResponseEntity<Void> rate(@PathVariable long id, @Valid @RequestBody RatingRequest request,
-			Authentication auth) {
-		if (!repository.spotExists(id)) {
-			throw notFound(id);
+	@Transactional
+	@PutMapping("/spots/{id}")
+	SpotDetail updateSpot(@PathVariable long id, @Valid @RequestBody SpotRequest request, Authentication auth) {
+		// Admins dürfen korrigieren (z. B. nach einer Meldung "falsche Angaben")
+		if (isAdmin(auth)) {
+			requireSpot(id);
 		}
-		repository.upsertRating(id, currentUserId(auth), request.score());
+		else {
+			requireSpotOwner(id, currentUserId(auth));
+		}
+		requireCategory(request.categoryCode());
+		repository.updateSpot(id, request);
+		return detail(id);
+	}
+
+	@Transactional
+	@DeleteMapping("/spots/{id}")
+	ResponseEntity<Void> deleteSpot(@PathVariable long id, Authentication auth) {
+		if (isAdmin(auth)) {
+			requireSpot(id);
+		}
+		else {
+			requireSpotOwner(id, currentUserId(auth));
+		}
+		repository.deleteSpot(id);
 		return ResponseEntity.noContent().build();
+	}
+
+	/** Bewertet (oder überschreibt die eigene Bewertung) und liefert den aktualisierten Spot. */
+	@Transactional
+	@PostMapping("/spots/{id}/ratings")
+	SpotDetail rate(@PathVariable long id, @Valid @RequestBody RatingRequest request, Authentication auth) {
+		requireSpot(id);
+		repository.upsertRating(id, currentUserId(auth), request.score(), blankToNull(request.comment()));
+		return detail(id);
+	}
+
+	@GetMapping("/spots/{id}/ratings")
+	List<Rating> ratings(@PathVariable long id) {
+		requireSpot(id);
+		return repository.findRatings(id);
+	}
+
+	@GetMapping("/spots/{id}/ratings/me")
+	Rating myRating(@PathVariable long id, Authentication auth) {
+		requireSpot(id);
+		return repository.findRating(id, currentUserId(auth))
+				.orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND,
+						"Spot " + id + " wurde noch nicht bewertet"));
+	}
+
+	@DeleteMapping("/spots/{id}/ratings/me")
+	ResponseEntity<Void> deleteMyRating(@PathVariable long id, Authentication auth) {
+		requireSpot(id);
+		repository.deleteRating(id, currentUserId(auth));
+		return ResponseEntity.noContent().build();
+	}
+
+	@Transactional
+	@PutMapping("/spots/{id}/ratings/{ratingId}")
+	SpotDetail updateRating(@PathVariable long id, @PathVariable long ratingId,
+			@Valid @RequestBody RatingRequest request, Authentication auth) {
+		if (requireRatingAuthor(id, ratingId) != currentUserId(auth)) {
+			throw new ResponseStatusException(HttpStatus.FORBIDDEN, "Nur eigene Bewertungen dürfen geändert werden");
+		}
+		repository.updateRating(ratingId, request.score(), blankToNull(request.comment()));
+		return detail(id);
+	}
+
+	@Transactional
+	@DeleteMapping("/spots/{id}/ratings/{ratingId}")
+	SpotDetail deleteRating(@PathVariable long id, @PathVariable long ratingId, Authentication auth) {
+		if (!isAdmin(auth) && requireRatingAuthor(id, ratingId) != currentUserId(auth)) {
+			throw new ResponseStatusException(HttpStatus.FORBIDDEN, "Nur eigene Bewertungen dürfen gelöscht werden");
+		}
+		repository.deleteRatingById(ratingId);
+		return detail(id);
 	}
 
 	@GetMapping("/spots/{id}/comments")
 	List<Comment> comments(@PathVariable long id) {
-		if (!repository.spotExists(id)) {
-			throw notFound(id);
-		}
+		requireSpot(id);
 		return repository.findComments(id);
 	}
 
 	@PostMapping("/spots/{id}/comments")
 	ResponseEntity<Void> comment(@PathVariable long id, @Valid @RequestBody CommentRequest request,
 			Authentication auth) {
+		requireSpot(id);
+		long commentId = repository.createComment(id, currentUserId(auth), request.text());
+		return ResponseEntity.created(URI.create("/api/spots/" + id + "/comments/" + commentId)).build();
+	}
+
+	@Transactional
+	@DeleteMapping("/spots/{id}/comments/{commentId}")
+	ResponseEntity<Void> deleteComment(@PathVariable long id, @PathVariable long commentId, Authentication auth) {
+		long authorId = repository.findCommentAuthor(id, commentId)
+				.orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND,
+						"Kommentar " + commentId + " nicht gefunden"));
+		if (!isAdmin(auth) && authorId != currentUserId(auth)) {
+			throw new ResponseStatusException(HttpStatus.FORBIDDEN, "Nur eigene Kommentare dürfen gelöscht werden");
+		}
+		repository.deleteComment(commentId);
+		return ResponseEntity.noContent().build();
+	}
+
+	private SpotDetail detail(long id) {
+		return repository.findSpot(id)
+				.map(spot -> spot.withPhotos(photos.findBySpot(id)))
+				.orElseThrow(() -> notFound(id));
+	}
+
+	private long requireRatingAuthor(long spotId, long ratingId) {
+		return repository.findRatingAuthor(spotId, ratingId)
+				.orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND,
+						"Bewertung " + ratingId + " nicht gefunden"));
+	}
+
+	private static String blankToNull(String text) {
+		return text == null || text.isBlank() ? null : text.trim();
+	}
+
+	private static boolean isAdmin(Authentication auth) {
+		return auth.getAuthorities().stream().anyMatch(a -> "ROLE_ADMIN".equals(a.getAuthority()));
+	}
+
+	private void requireSpot(long id) {
 		if (!repository.spotExists(id)) {
 			throw notFound(id);
 		}
-		long commentId = repository.createComment(id, currentUserId(auth), request.text());
-		return ResponseEntity.created(URI.create("/api/spots/" + id + "/comments/" + commentId)).build();
+	}
+
+	private void requireSpotOwner(long id, long userId) {
+		long ownerId = repository.findSpotOwner(id).orElseThrow(() -> notFound(id));
+		if (ownerId != userId) {
+			throw new ResponseStatusException(HttpStatus.FORBIDDEN, "Nur der Ersteller darf den Spot ändern");
+		}
+	}
+
+	private void requireCategory(String code) {
+		if (!repository.categoryExists(code)) {
+			throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "Unbekannte Kategorie: " + code);
+		}
 	}
 
 	private long currentUserId(Authentication auth) {
