@@ -75,16 +75,35 @@ class SpotRepository {
 				.list();
 	}
 
-	List<SpotSummary> findSpots(String categoryCode) {
-		String sql = SPOT_SELECT + """
-				WHERE (CAST(:categoryCode AS varchar) IS NULL OR c.code = :categoryCode)
-				""" + SPOT_GROUP_BY + """
-				ORDER BY s.name
+	private static final String SPOT_FILTER = """
+			WHERE (CAST(:categoryCode AS varchar) IS NULL OR c.code = :categoryCode)
+			  AND (CAST(:search AS varchar) IS NULL OR s.name ILIKE '%' || CAST(:search AS varchar) || '%'
+			       OR s.city ILIKE '%' || CAST(:search AS varchar) || '%')
+			""";
+
+	List<SpotSummary> findSpots(String categoryCode, String search, int page, int size) {
+		String sql = SPOT_SELECT + SPOT_FILTER + SPOT_GROUP_BY + """
+				ORDER BY s.name, s.id
+				LIMIT :limit OFFSET :offset
 				""";
 		return jdbc.sql(sql)
 				.param("categoryCode", categoryCode)
+				.param("search", escapeLike(search))
+				.param("limit", size)
+				.param("offset", (long) page * size)
 				.query(SPOT_SUMMARY)
 				.list();
+	}
+
+	long countSpots(String categoryCode, String search) {
+		return jdbc.sql("""
+				SELECT COUNT(*) FROM spot s
+				JOIN category c ON c.id = s.category_id
+				""" + SPOT_FILTER)
+				.param("categoryCode", categoryCode)
+				.param("search", escapeLike(search))
+				.query(Long.class)
+				.single();
 	}
 
 	List<NearbySpot> findSpotsNear(double latitude, double longitude, double radiusKm, String categoryCode) {
@@ -248,6 +267,12 @@ class SpotRepository {
 		params.put("longitude", r.longitude());
 		params.put("openingHours", r.openingHours());
 		return params;
+	}
+
+	/** Maskiert LIKE-Platzhalter, damit z. B. "%" im Suchbegriff wörtlich gesucht wird. */
+	private static String escapeLike(String search) {
+		return search == null ? null
+				: search.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_");
 	}
 
 	private static Double averageRating(ResultSet rs) throws SQLException {

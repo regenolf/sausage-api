@@ -19,7 +19,7 @@ Lesende `GET`-Endpunkte sind öffentlich, alles andere braucht HTTP Basic Auth.
 | `POST` | `/api/users` | Registrieren (öffentlich) |
 | `GET` | `/api/users/me` | Eigenes Profil 🔒 |
 | `GET` | `/api/categories` | Alle Kategorien |
-| `GET` | `/api/spots?category=` | Alle Spots, optional nach Kategorie gefiltert |
+| `GET` | `/api/spots?category=&q=&page=0&size=20` | Spots paginiert (`content`, `totalElements`, `totalPages`), Suche in Name/Stadt |
 | `GET` | `/api/spots/nearby?latitude=&longitude=&radiusKm=&category=` | Umkreissuche, sortiert nach Entfernung (`distanceKm`) |
 | `GET` | `/api/spots/{id}` | Spot-Details inkl. Durchschnittsbewertung und Ersteller |
 | `POST` | `/api/spots` | Spot anlegen 🔒 |
@@ -31,3 +31,6 @@ Lesende `GET`-Endpunkte sind öffentlich, alles andere braucht HTTP Basic Auth.
 | `GET` | `/api/spots/{id}/comments` | Kommentare (neueste zuerst, mit Benutzername) |
 | `POST` | `/api/spots/{id}/comments` | Kommentieren 🔒 |
 | `DELETE` | `/api/spots/{id}/comments/{commentId}` | Kommentar löschen 🔒 (nur Autor) |
+
+Fehler kommen als [Problem Details](https://www.rfc-editor.org/rfc/rfc9457) (`application/problem+json`) mit
+deutscher Meldung in `detail`; bei Validierungsfehlern stehen die betroffenen Felder in `errors`.

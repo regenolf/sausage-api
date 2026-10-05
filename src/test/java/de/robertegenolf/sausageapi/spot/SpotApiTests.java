@@ -244,6 +244,51 @@ class SpotApiTests {
 				.andExpect(jsonPath("$").isEmpty());
 	}
 
+	@Test
+	void spotListeIstPaginiertUndDurchsuchbar() throws Exception {
+		String username = newName();
+		register(username);
+		for (int i = 1; i <= 3; i++) {
+			createSpot(username, "Suche " + username + " " + i);
+		}
+
+		mvc.perform(get("/api/spots").param("q", username).param("size", "2"))
+				.andExpect(status().isOk())
+				.andExpect(jsonPath("$.content.length()").value(2))
+				.andExpect(jsonPath("$.content[0].name").value("Suche " + username + " 1"))
+				.andExpect(jsonPath("$.totalElements").value(3))
+				.andExpect(jsonPath("$.totalPages").value(2));
+		mvc.perform(get("/api/spots").param("q", username.toUpperCase()).param("size", "2").param("page", "1"))
+				.andExpect(status().isOk())
+				.andExpect(jsonPath("$.content.length()").value(1))
+				.andExpect(jsonPath("$.content[0].name").value("Suche " + username + " 3"));
+		mvc.perform(get("/api/spots").param("q", "%" + username))
+				.andExpect(jsonPath("$.totalElements").value(0));
+	}
+
+	@Test
+	void fehlerLiefernProblemDetailsMitMeldung() throws Exception {
+		mvc.perform(get("/api/spots/999999999"))
+				.andExpect(status().isNotFound())
+				.andExpect(jsonPath("$.detail").value("Spot 999999999 nicht gefunden"));
+
+		String username = newName();
+		register(username);
+		mvc.perform(post("/api/spots").with(httpBasic(username, PASSWORD))
+						.contentType(MediaType.APPLICATION_JSON)
+						.content("{\"categoryCode\":\"BRATWURST\",\"name\":\"\",\"latitude\":91,\"longitude\":6.9}"))
+				.andExpect(status().isBadRequest())
+				.andExpect(jsonPath("$.errors.name").exists())
+				.andExpect(jsonPath("$.errors.latitude").exists());
+
+		mvc.perform(get("/api/spots").param("size", "500"))
+				.andExpect(status().isBadRequest())
+				.andExpect(jsonPath("$.errors.size").exists());
+		mvc.perform(get("/api/spots/nearby").param("latitude", "95").param("longitude", "6.9"))
+				.andExpect(status().isBadRequest())
+				.andExpect(jsonPath("$.errors.latitude").exists());
+	}
+
 	private long createSpot(String username, String name) throws Exception {
 		return createSpot(username, name, 50.9375, 6.9603);
 	}

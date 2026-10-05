@@ -4,6 +4,7 @@ import de.robertegenolf.sausageapi.spot.SpotDtos.Category;
 import de.robertegenolf.sausageapi.spot.SpotDtos.Comment;
 import de.robertegenolf.sausageapi.spot.SpotDtos.CommentRequest;
 import de.robertegenolf.sausageapi.spot.SpotDtos.NearbySpot;
+import de.robertegenolf.sausageapi.spot.SpotDtos.Page;
 import de.robertegenolf.sausageapi.spot.SpotDtos.RatingRequest;
 import de.robertegenolf.sausageapi.spot.SpotDtos.SpotDetail;
 import de.robertegenolf.sausageapi.spot.SpotDtos.SpotRequest;
@@ -12,12 +13,14 @@ import de.robertegenolf.sausageapi.user.UserRepository;
 import jakarta.validation.Valid;
 import jakarta.validation.constraints.DecimalMax;
 import jakarta.validation.constraints.DecimalMin;
+import jakarta.validation.constraints.Max;
+import jakarta.validation.constraints.Min;
 import jakarta.validation.constraints.NotNull;
+import jakarta.validation.constraints.Size;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
 import org.springframework.security.core.Authentication;
 import org.springframework.transaction.annotation.Transactional;
-import org.springframework.validation.annotation.Validated;
 import org.springframework.web.bind.annotation.DeleteMapping;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PathVariable;
@@ -32,7 +35,6 @@ import org.springframework.web.server.ResponseStatusException;
 import java.net.URI;
 import java.util.List;
 
-@Validated
 @RestController
 @RequestMapping("/api")
 class SpotController {
@@ -51,8 +53,13 @@ class SpotController {
 	}
 
 	@GetMapping("/spots")
-	List<SpotSummary> spots(@RequestParam(required = false) String category) {
-		return repository.findSpots(category);
+	Page<SpotSummary> spots(@RequestParam(required = false) String category,
+			@RequestParam(required = false) @Size(max = 150) String q,
+			@RequestParam(defaultValue = "0") @Min(0) int page,
+			@RequestParam(defaultValue = "20") @Min(1) @Max(100) int size) {
+		String search = q == null || q.isBlank() ? null : q.trim();
+		return Page.of(repository.findSpots(category, search, page, size), page, size,
+				repository.countSpots(category, search));
 	}
 
 	@GetMapping("/spots/nearby")

@@ -10,6 +10,7 @@ import jakarta.validation.constraints.Size;
 
 import java.math.BigDecimal;
 import java.time.Instant;
+import java.util.List;
 
 public final class SpotDtos {
 
@@ -21,6 +22,13 @@ public final class SpotDtos {
 
 	public record SpotSummary(long id, String categoryCode, String name, String city,
 			BigDecimal latitude, BigDecimal longitude, Double averageRating, long ratingCount) {
+	}
+
+	public record Page<T>(List<T> content, int page, int size, long totalElements, int totalPages) {
+
+		static <T> Page<T> of(List<T> content, int page, int size, long totalElements) {
+			return new Page<>(content, page, size, totalElements, (int) ((totalElements + size - 1) / size));
+		}
 	}
 
 	public record NearbySpot(long id, String categoryCode, String name, String city,
