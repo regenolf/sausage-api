@@ -10,6 +10,23 @@ docker compose up -d   # Postgres auf localhost:5432
 
 Die Tests (`./mvnw test`) laufen ebenfalls gegen diese lokale Datenbank.
 
+API und Datenbank komplett im Container:
+
+```bash
+docker compose --profile app up --build   # API auf http://localhost:8080
+```
+
+### Konfiguration (Umgebungsvariablen)
+
+| Variable | Standard |
+|---|---|
+| `DB_URL` | `jdbc:postgresql://localhost:5432/sausage` |
+| `DB_USERNAME` / `DB_PASSWORD` | `sausage` / `sausage` |
+| `CORS_ALLOWED_ORIGINS` | `http://localhost:3000,http://localhost:5173` |
+
+Health-Checks: `/actuator/health`, `/actuator/health/liveness`, `/actuator/health/readiness`.
+Die GitHub-Actions-CI (`.github/workflows/ci.yml`) startet Postgres als Service und führt `./mvnw verify` aus.
+
 ## API
 
 Lesende `GET`-Endpunkte sind öffentlich, alles andere braucht HTTP Basic Auth.
