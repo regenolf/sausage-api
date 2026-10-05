@@ -21,6 +21,7 @@ import jakarta.validation.constraints.Size;
 import org.springframework.dao.DuplicateKeyException;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
+import org.springframework.security.authentication.AnonymousAuthenticationToken;
 import org.springframework.security.core.Authentication;
 import org.springframework.transaction.annotation.Transactional;
 import org.springframework.web.bind.annotation.DeleteMapping;
@@ -100,15 +101,15 @@ class SpotController {
 	}
 
 	@GetMapping("/spots/{id}")
-	SpotDetail spot(@PathVariable long id) {
-		return detail(id);
+	SpotDetail spot(@PathVariable long id, Authentication auth) {
+		return detail(id, auth);
 	}
 
 	@PostMapping("/spots")
 	ResponseEntity<SpotDetail> createSpot(@Valid @RequestBody SpotRequest request, Authentication auth) {
 		requireCategory(request.categoryCode());
 		long id = repository.createSpot(request, currentUserId(auth));
-		SpotDetail created = detail(id);
+		SpotDetail created = detail(id, auth);
 		return ResponseEntity.created(URI.create("/api/spots/" + id)).body(created);
 	}
 
@@ -124,7 +125,7 @@ class SpotController {
 		}
 		requireCategory(request.categoryCode());
 		repository.updateSpot(id, request);
-		return detail(id);
+		return detail(id, auth);
 	}
 
 	@Transactional
@@ -152,13 +153,13 @@ class SpotController {
 	SpotDetail rate(@PathVariable long id, @Valid @RequestBody RatingRequest request, Authentication auth) {
 		requireSpot(id);
 		repository.upsertRating(id, currentUserId(auth), request.score(), blankToNull(request.comment()));
-		return detail(id);
+		return detail(id, auth);
 	}
 
 	@GetMapping("/spots/{id}/ratings")
-	List<Rating> ratings(@PathVariable long id) {
+	List<Rating> ratings(@PathVariable long id, Authentication auth) {
 		requireSpot(id);
-		return repository.findRatings(id);
+		return repository.findRatings(id, viewerId(auth));
 	}
 
 	@GetMapping("/spots/{id}/ratings/me")
@@ -184,7 +185,7 @@ class SpotController {
 			throw new ResponseStatusException(HttpStatus.FORBIDDEN, "Nur eigene Bewertungen dürfen geändert werden");
 		}
 		repository.updateRating(ratingId, request.score(), blankToNull(request.comment()));
-		return detail(id);
+		return detail(id, auth);
 	}
 
 	@Transactional
@@ -194,13 +195,13 @@ class SpotController {
 			throw new ResponseStatusException(HttpStatus.FORBIDDEN, "Nur eigene Bewertungen dürfen gelöscht werden");
 		}
 		repository.deleteRatingById(ratingId);
-		return detail(id);
+		return detail(id, auth);
 	}
 
 	@GetMapping("/spots/{id}/comments")
-	List<Comment> comments(@PathVariable long id) {
+	List<Comment> comments(@PathVariable long id, Authentication auth) {
 		requireSpot(id);
-		return repository.findComments(id);
+		return repository.findComments(id, viewerId(auth));
 	}
 
 	@PostMapping("/spots/{id}/comments")
@@ -224,10 +225,18 @@ class SpotController {
 		return ResponseEntity.noContent().build();
 	}
 
-	private SpotDetail detail(long id) {
+	private SpotDetail detail(long id, Authentication auth) {
 		return repository.findSpot(id)
-				.map(spot -> spot.withPhotos(photos.findBySpot(id)))
+				.map(spot -> spot.withPhotos(photos.findBySpot(id, viewerId(auth))))
 				.orElseThrow(() -> notFound(id));
+	}
+
+	/** User-ID der anfragenden Person für das Ausblenden blockierter Nutzer; -1 ohne Anmeldung. */
+	private long viewerId(Authentication auth) {
+		if (auth == null || !auth.isAuthenticated() || auth instanceof AnonymousAuthenticationToken) {
+			return -1;
+		}
+		return users.findByUsername(auth.getName()).map(UserRepository.StoredUser::id).orElse(-1L);
 	}
 
 	private long requireRatingAuthor(long spotId, long ratingId) {

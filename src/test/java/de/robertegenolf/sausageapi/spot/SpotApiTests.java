@@ -920,6 +920,65 @@ class SpotApiTests {
 	}
 
 	@Test
+	void blockierteNutzerWerdenAusgeblendet() throws Exception {
+		String me = newName();
+		String troll = newName();
+		String other = newName();
+		register(me);
+		register(troll);
+		register(other);
+		long spotId = createSpot(other, "Block " + other);
+		mvc.perform(post("/api/spots/" + spotId + "/ratings").with(httpBasic(troll, PASSWORD))
+				.contentType(MediaType.APPLICATION_JSON).content("{\"score\":1,\"comment\":\"Troll-Text\"}"));
+		mvc.perform(post("/api/spots/" + spotId + "/comments").with(httpBasic(troll, PASSWORD))
+				.contentType(MediaType.APPLICATION_JSON).content("{\"text\":\"Troll-Kommentar\"}"));
+		BufferedImage image = new BufferedImage(2, 2, BufferedImage.TYPE_INT_RGB);
+		ByteArrayOutputStream out = new ByteArrayOutputStream();
+		ImageIO.write(image, "png", out);
+		mvc.perform(multipart("/api/spots/" + spotId + "/photos").with(httpBasic(troll, PASSWORD))
+						.file(new MockMultipartFile("file", "t.png", "image/png", out.toByteArray())))
+				.andExpect(status().isCreated());
+
+		mvc.perform(post("/api/users/me/blocks").contentType(MediaType.APPLICATION_JSON)
+						.content("{\"username\":\"" + troll + "\"}"))
+				.andExpect(status().isUnauthorized());
+		mvc.perform(post("/api/users/me/blocks").with(httpBasic(me, PASSWORD)).contentType(MediaType.APPLICATION_JSON)
+						.content("{\"username\":\"" + me + "\"}"))
+				.andExpect(status().isBadRequest());
+		mvc.perform(post("/api/users/me/blocks").with(httpBasic(me, PASSWORD)).contentType(MediaType.APPLICATION_JSON)
+						.content("{\"username\":\"niemand" + me + "\"}"))
+				.andExpect(status().isNotFound());
+		mvc.perform(post("/api/users/me/blocks").with(httpBasic(me, PASSWORD)).contentType(MediaType.APPLICATION_JSON)
+						.content("{\"username\":\"" + troll + "\"}"))
+				.andExpect(status().isNoContent());
+		mvc.perform(get("/api/users/me/blocks").with(httpBasic(me, PASSWORD)))
+				.andExpect(jsonPath("$[0].username").value(troll));
+
+		// für mich ausgeblendet …
+		mvc.perform(get("/api/spots/" + spotId + "/ratings").with(httpBasic(me, PASSWORD)))
+				.andExpect(jsonPath("$").isEmpty());
+		mvc.perform(get("/api/spots/" + spotId + "/comments").with(httpBasic(me, PASSWORD)))
+				.andExpect(jsonPath("$").isEmpty());
+		mvc.perform(get("/api/spots/" + spotId).with(httpBasic(me, PASSWORD)))
+				.andExpect(jsonPath("$.photos").isEmpty())
+				.andExpect(jsonPath("$.ratingCount").value(1));
+		mvc.perform(get("/api/spots/" + spotId + "/photos").with(httpBasic(me, PASSWORD)))
+				.andExpect(jsonPath("$").isEmpty());
+		// … für andere und anonym sichtbar
+		mvc.perform(get("/api/spots/" + spotId + "/ratings"))
+				.andExpect(jsonPath("$[0].comment").value("Troll-Text"));
+		mvc.perform(get("/api/spots/" + spotId).with(httpBasic(other, PASSWORD)))
+				.andExpect(jsonPath("$.photos.length()").value(1));
+		mvc.perform(get("/api/users/me/export").with(httpBasic(me, PASSWORD)))
+				.andExpect(jsonPath("$.blockierte_nutzer[0].username").value(troll));
+
+		mvc.perform(delete("/api/users/me/blocks/" + troll).with(httpBasic(me, PASSWORD)))
+				.andExpect(status().isNoContent());
+		mvc.perform(get("/api/spots/" + spotId + "/comments").with(httpBasic(me, PASSWORD)))
+				.andExpect(jsonPath("$[0].text").value("Troll-Kommentar"));
+	}
+
+	@Test
 	void pixelbombeWirdAbgelehnt() throws Exception {
 		String owner = newName();
 		register(owner);

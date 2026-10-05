@@ -20,6 +20,7 @@ import org.springframework.security.core.Authentication;
 import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.web.bind.annotation.DeleteMapping;
 import org.springframework.web.bind.annotation.GetMapping;
+import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.PutMapping;
 import org.springframework.web.bind.annotation.RequestBody;
@@ -29,6 +30,7 @@ import org.springframework.web.server.ResponseStatusException;
 
 import java.net.URI;
 import java.nio.charset.StandardCharsets;
+import java.util.List;
 import java.util.Map;
 
 @RestController
@@ -51,6 +53,9 @@ class UserController {
 	public record DeleteAccountRequest(@NotBlank String password) {
 	}
 
+	public record BlockRequest(@NotBlank String username) {
+	}
+
 	public record ChangePasswordRequest(
 			@NotBlank String currentPassword,
 			@NotBlank @Size(min = 8, max = 100) String newPassword) {
@@ -61,15 +66,18 @@ class UserController {
 	private final PasswordEncoder passwordEncoder;
 	private final LoginThrottle throttle;
 	private final TokenService tokens;
+	private final UserBlockRepository blocks;
 	private final String termsVersion;
 
 	UserController(UserRepository repository, UserExportRepository exports, PasswordEncoder passwordEncoder,
-			LoginThrottle throttle, TokenService tokens, @Value("${app.terms.version}") String termsVersion) {
+			LoginThrottle throttle, TokenService tokens, UserBlockRepository blocks,
+			@Value("${app.terms.version}") String termsVersion) {
 		this.repository = repository;
 		this.exports = exports;
 		this.passwordEncoder = passwordEncoder;
 		this.throttle = throttle;
 		this.tokens = tokens;
+		this.blocks = blocks;
 		this.termsVersion = termsVersion;
 	}
 
@@ -144,5 +152,36 @@ class UserController {
 				.header(HttpHeaders.CONTENT_DISPOSITION, ContentDisposition.attachment()
 						.filename("sausage-daten-" + user.username() + ".json", StandardCharsets.UTF_8).build().toString())
 				.body(exports.export(user.id()));
+	}
+
+	/** Nutzer, deren Bewertungen, Kommentare und Fotos für mich ausgeblendet sind. */
+	@GetMapping("/me/blocks")
+	List<UserBlockRepository.BlockedUser> blocked(Authentication auth) {
+		return blocks.findBlocked(currentUser(auth).id());
+	}
+
+	/** Blockiert einen Nutzer: seine Beiträge werden für mich ausgeblendet (er erfährt davon nichts). */
+	@PostMapping("/me/blocks")
+	ResponseEntity<Void> block(@Valid @RequestBody BlockRequest request, Authentication auth) {
+		UserRepository.StoredUser me = currentUser(auth);
+		long blockedId = blocks.findUserId(request.username().trim())
+				.orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "Benutzer " + request.username() + " nicht gefunden"));
+		if (blockedId == me.id()) {
+			throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "Man kann sich nicht selbst blockieren");
+		}
+		blocks.block(me.id(), blockedId);
+		return ResponseEntity.noContent().build();
+	}
+
+	@DeleteMapping("/me/blocks/{username}")
+	ResponseEntity<Void> unblock(@PathVariable String username, Authentication auth) {
+		UserRepository.StoredUser me = currentUser(auth);
+		blocks.findUserId(username).ifPresent(blockedId -> blocks.unblock(me.id(), blockedId));
+		return ResponseEntity.noContent().build();
+	}
+
+	private UserRepository.StoredUser currentUser(Authentication auth) {
+		return repository.findByUsername(auth.getName())
+				.orElseThrow(() -> new ResponseStatusException(HttpStatus.UNAUTHORIZED));
 	}
 }

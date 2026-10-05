@@ -56,6 +56,10 @@ class UserExportRepository {
 				       status, decision_note AS begruendung,
 				       to_char(created_at, 'YYYY-MM-DD"T"HH24:MI:SS') AS erstellt_am
 				FROM report WHERE reporter_id = :id ORDER BY id""", userId));
+		data.put("blockierte_nutzer", rows("""
+				SELECT u.username, to_char(b.created_at, 'YYYY-MM-DD"T"HH24:MI:SS') AS blockiert_am
+				FROM user_block b JOIN app_user u ON u.id = b.blocked_id
+				WHERE b.blocker_id = :id ORDER BY u.username""", userId));
 		return data;
 	}
 

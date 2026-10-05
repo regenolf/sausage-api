@@ -274,6 +274,9 @@ class SpotRepository {
 				.single();
 	}
 
+	/** SQL-Bedingung: Verfasser (Spalte als Platzhalter) ist nicht von :viewerId blockiert. */
+	static final String NOT_BLOCKED = "NOT EXISTS (SELECT 1 FROM user_block b WHERE b.blocker_id = :viewerId AND b.blocked_id = %s)";
+
 	private static final RowMapper<Rating> RATING = (rs, n) -> new Rating(rs.getLong("id"), rs.getInt("score"),
 			rs.getString("comment"), rs.getString("username"), rs.getString("username"),
 			rs.getTimestamp("created_at").toInstant());
@@ -298,9 +301,12 @@ class SpotRepository {
 				.update();
 	}
 
-	List<Rating> findRatings(long spotId) {
-		return jdbc.sql(RATING_SELECT + "WHERE r.spot_id = :spotId\nORDER BY r.created_at DESC, r.id DESC\n")
+	/** Bewertungen eines Spots ohne die von Nutzern, die {@code viewerId} blockiert hat (-1 = anonym). */
+	List<Rating> findRatings(long spotId, long viewerId) {
+		return jdbc.sql(RATING_SELECT + "WHERE r.spot_id = :spotId AND " + NOT_BLOCKED.formatted("r.user_id")
+						+ "\nORDER BY r.created_at DESC, r.id DESC\n")
 				.param("spotId", spotId)
+				.param("viewerId", viewerId)
 				.query(RATING)
 				.list();
 	}
@@ -356,15 +362,17 @@ class SpotRepository {
 				.single();
 	}
 
-	List<Comment> findComments(long spotId) {
+	/** Kommentare eines Spots ohne die von Nutzern, die {@code viewerId} blockiert hat (-1 = anonym). */
+	List<Comment> findComments(long spotId, long viewerId) {
 		return jdbc.sql("""
 				SELECT c.id, c.spot_id, c.user_id, u.username, c.text, c.created_at
 				FROM comment c
 				JOIN app_user u ON u.id = c.user_id
-				WHERE c.spot_id = :spotId
+				WHERE c.spot_id = :spotId AND %s
 				ORDER BY c.created_at DESC, c.id DESC
-				""")
+				""".formatted(NOT_BLOCKED.formatted("c.user_id")))
 				.param("spotId", spotId)
+				.param("viewerId", viewerId)
 				.query((rs, n) -> new Comment(rs.getLong("id"), rs.getLong("spot_id"),
 						rs.getLong("user_id"), rs.getString("username"), rs.getString("text"),
 						rs.getTimestamp("created_at").toInstant()))
