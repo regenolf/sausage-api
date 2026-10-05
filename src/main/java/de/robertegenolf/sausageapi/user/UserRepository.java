@@ -12,13 +12,37 @@ public class UserRepository {
 	public record StoredUser(long id, String username, String passwordHash, String role, int tokenVersion) {
 	}
 
-	public record UserProfile(long id, String username, String email, String role, Instant createdAt) {
+	/**
+	 * Profil des angemeldeten Users. {@code termsVersion}/{@code termsAcceptedAt}: zuletzt akzeptierte Nutzungsbedingungen;
+	 * weicht {@code currentTermsVersion} ab, sollte der Client erneut um Zustimmung bitten.
+	 */
+	public record UserProfile(long id, String username, String email, String role, Instant createdAt,
+			String termsVersion, Instant termsAcceptedAt, String currentTermsVersion) {
 	}
 
-	/** Benutzernamen dürfen kein "@" (sonst Verwechslung mit E-Mail beim Login) und kein ":" (Basic Auth) enthalten. */
-	public static final String USERNAME_PATTERN = "[^@:]+";
+	/**
+	 * Erlaubt sind Buchstaben, Ziffern, Leerzeichen, Punkt, Unterstrich und Bindestrich; Anfang und Ende müssen
+	 * Buchstabe oder Ziffer sein. Damit ist der Name kein E-Mail-Login ("@"), bricht Basic Auth nicht (":") und ist
+	 * als Pfadsegment (z. B. Admin-Sperre) nutzbar.
+	 */
+	public static final String USERNAME_PATTERN = "[\\p{L}\\p{N}](?:[\\p{L}\\p{N} ._-]*[\\p{L}\\p{N}])?";
 
-	public static final String USERNAME_MESSAGE = "darf weder @ noch : enthalten";
+	public static final String TERMS_MESSAGE = "Bitte die Nutzungsbedingungen akzeptieren und bestätigen, dass du mindestens 16 Jahre alt bist";
+
+	public static final String USERNAME_MESSAGE = "nur Buchstaben, Ziffern, Leerzeichen, Punkt, Unterstrich und Bindestrich";
+
+	private static final java.util.Set<String> RESERVED_USERNAMES = java.util.Set.of("admin", "administrator",
+			"moderator", "moderation", "support", "sausage", "sausageteam", "team", "system", "root");
+
+	/** Vereinheitlicht einen Benutzernamen (Unicode NFKC, Leerzeichen am Rand entfernt). */
+	public static String normalizeUsername(String username) {
+		return java.text.Normalizer.normalize(username.trim(), java.text.Normalizer.Form.NFKC);
+	}
+
+	/** Namen, die nach Betreiber oder Moderation aussehen (Groß-/Kleinschreibung und Trennzeichen egal). */
+	public static boolean isReservedUsername(String username) {
+		return RESERVED_USERNAMES.contains(username.toLowerCase(java.util.Locale.ROOT).replaceAll("[ ._-]", ""));
+	}
 
 	private final JdbcClient jdbc;
 
@@ -50,12 +74,27 @@ public class UserRepository {
 				.optional();
 	}
 
-	Optional<UserProfile> findProfile(String username) {
-		return jdbc.sql("SELECT id, username, email, role, created_at FROM app_user WHERE username = :username AND enabled")
+	Optional<UserProfile> findProfile(String username, String currentTermsVersion) {
+		return jdbc.sql("""
+				SELECT id, username, email, role, created_at, terms_version, terms_accepted_at
+				FROM app_user WHERE username = :username AND enabled
+				""")
 				.param("username", username)
-				.query((rs, n) -> new UserProfile(rs.getLong("id"), rs.getString("username"),
-						rs.getString("email"), rs.getString("role"), rs.getTimestamp("created_at").toInstant()))
+				.query((rs, n) -> {
+					java.sql.Timestamp accepted = rs.getTimestamp("terms_accepted_at");
+					return new UserProfile(rs.getLong("id"), rs.getString("username"), rs.getString("email"),
+							rs.getString("role"), rs.getTimestamp("created_at").toInstant(), rs.getString("terms_version"),
+							accepted == null ? null : accepted.toInstant(), currentTermsVersion);
+				})
 				.optional();
+	}
+
+	/** Speichert die Zustimmung zur angegebenen Version der Nutzungsbedingungen (jetzt). */
+	void acceptTerms(long id, String termsVersion) {
+		jdbc.sql("UPDATE app_user SET terms_version = :version, terms_accepted_at = CURRENT_TIMESTAMP WHERE id = :id")
+				.param("version", termsVersion)
+				.param("id", id)
+				.update();
 	}
 
 	/** Setzt ein neues Passwort und macht damit alle bisher ausgestellten Tokens ungültig. */
@@ -87,15 +126,18 @@ public class UserRepository {
 				.update();
 	}
 
-	public long create(String username, String email, String passwordHash) {
+	/** Legt einen Account an; {@code termsVersion} ist die akzeptierte Version der Nutzungsbedingungen (null = nicht akzeptiert). */
+	public long create(String username, String email, String passwordHash, String termsVersion) {
 		return jdbc.sql("""
-				INSERT INTO app_user (username, email, password_hash)
-				VALUES (:username, :email, :passwordHash)
+				INSERT INTO app_user (username, email, password_hash, terms_version, terms_accepted_at)
+				VALUES (:username, :email, :passwordHash, CAST(:termsVersion AS varchar),
+				        CASE WHEN CAST(:termsVersion AS varchar) IS NULL THEN NULL ELSE CURRENT_TIMESTAMP END)
 				RETURNING id
 				""")
 				.param("username", username)
 				.param("email", email)
 				.param("passwordHash", passwordHash)
+				.param("termsVersion", termsVersion)
 				.query(Long.class)
 				.single();
 	}

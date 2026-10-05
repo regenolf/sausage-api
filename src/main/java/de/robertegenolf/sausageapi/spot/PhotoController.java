@@ -6,6 +6,7 @@ import org.springframework.http.CacheControl;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.MediaType;
 import org.springframework.http.ResponseEntity;
+import org.springframework.security.authentication.AnonymousAuthenticationToken;
 import org.springframework.security.core.Authentication;
 import org.springframework.transaction.annotation.Transactional;
 import org.springframework.web.bind.annotation.DeleteMapping;
@@ -41,9 +42,11 @@ class PhotoController {
 	}
 
 	@GetMapping
-	List<SpotPhoto> list(@PathVariable long spotId) {
+	List<SpotPhoto> list(@PathVariable long spotId, Authentication auth) {
 		requireSpot(spotId);
-		return photos.findBySpot(spotId);
+		long viewerId = auth == null || auth instanceof AnonymousAuthenticationToken ? -1
+				: users.findByUsername(auth.getName()).map(UserRepository.StoredUser::id).orElse(-1L);
+		return photos.findBySpot(spotId, viewerId);
 	}
 
 	@GetMapping("/{photoId}")
@@ -74,6 +77,7 @@ class PhotoController {
 		}
 		byte[] data;
 		try {
+			ImageMetadataStripper.checkDimensions(upload, contentType);
 			// GPS-Position und andere Metadaten nicht veröffentlichen
 			data = ImageMetadataStripper.strip(upload, contentType);
 		}

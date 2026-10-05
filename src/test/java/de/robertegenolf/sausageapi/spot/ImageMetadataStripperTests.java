@@ -81,6 +81,31 @@ class ImageMetadataStripperTests {
 				.isInstanceOf(ImageMetadataStripper.InvalidImageException.class);
 	}
 
+	@Test
+	void abmessungenWerdenGelesenUndBegrenzt() throws Exception {
+		ImageMetadataStripper.checkDimensions(image("png"), "image/png");
+		ImageMetadataStripper.checkDimensions(image("jpg"), "image/jpeg");
+		assertThat(ImageMetadataStripper.pngSize(image("png"))).containsExactly(16, 8);
+		assertThat(ImageMetadataStripper.jpegSize(image("jpg"))).containsExactly(16, 8);
+
+		// WebP verlustfrei (VP8L): 14-Bit-Felder für Breite-1 und Höhe-1
+		int bits = (640 - 1) | ((480 - 1) << 14);
+		byte[] vp8l = ByteBuffer.allocate(5).order(ByteOrder.LITTLE_ENDIAN).put((byte) 0x2F).putInt(bits).array();
+		assertThat(ImageMetadataStripper.webpSize(riff(chunk("VP8L", vp8l)))).containsExactly(640, 480);
+		// WebP erweitert (VP8X): 24-Bit-Felder
+		byte[] vp8x = new byte[10];
+		vp8x[4] = (byte) 0x0F; vp8x[5] = 0x27; // 9999 -> Breite 10000
+		vp8x[7] = (byte) 0x0F; vp8x[8] = 0x27;
+		assertThatThrownBy(() -> ImageMetadataStripper.checkDimensions(riff(chunk("VP8X", vp8x)), "image/webp"))
+				.isInstanceOf(ImageMetadataStripper.InvalidImageException.class)
+				.hasMessageContaining("zu groß");
+
+		byte[] huge = image("png");
+		ByteBuffer.wrap(huge).putInt(16, 20_000).putInt(20, 10);
+		assertThatThrownBy(() -> ImageMetadataStripper.checkDimensions(huge, "image/png"))
+				.hasMessageContaining("Kantenlänge");
+	}
+
 	private static byte[] image(String format) throws IOException {
 		BufferedImage img = new BufferedImage(16, 8, BufferedImage.TYPE_INT_RGB);
 		img.setRGB(3, 3, 0xFF0000);

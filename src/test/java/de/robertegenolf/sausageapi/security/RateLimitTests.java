@@ -46,7 +46,7 @@ class RateLimitTests {
 	void nachZuVielenFehlversuchenGesperrt() throws Exception {
 		String username = "rl" + UUID.randomUUID().toString().substring(0, 8);
 		mvc.perform(post("/api/users").with(ip("10.0.1.1")).contentType(MediaType.APPLICATION_JSON)
-						.content("{\"username\":\"%s\",\"email\":\"%s@test.de\",\"password\":\"geheimesPasswort\"}"
+						.content("{\"username\":\"%s\",\"email\":\"%s@test.de\",\"acceptTerms\":true,\"password\":\"geheimesPasswort\"}"
 								.formatted(username, username)))
 				.andExpect(status().isCreated());
 
@@ -62,7 +62,7 @@ class RateLimitTests {
 		mvc.perform(get("/api/categories").with(attacker)).andExpect(status().isOk());
 		// auch die JSON-Anmeldung ist gesperrt …
 		mvc.perform(post("/api/auth/login").with(attacker).contentType(MediaType.APPLICATION_JSON)
-						.content("{\"email\":\"%s\",\"password\":\"geheimesPasswort\"}".formatted(username)))
+						.content("{\"email\":\"%s\",\"acceptTerms\":true,\"password\":\"geheimesPasswort\"}".formatted(username)))
 				.andExpect(status().isTooManyRequests());
 		// der echte User von seiner IP auch
 		mvc.perform(get("/api/users/me").with(ip("10.0.1.3")).with(httpBasic(username, "geheimesPasswort")))
@@ -74,11 +74,11 @@ class RateLimitTests {
 		RequestPostProcessor attacker = ip("10.0.2.1");
 		for (int i = 0; i < 3; i++) {
 			mvc.perform(post("/api/auth/login").with(attacker).contentType(MediaType.APPLICATION_JSON)
-							.content("{\"email\":\"niemand@test.de\",\"password\":\"x\"}"))
+							.content("{\"email\":\"niemand@test.de\",\"acceptTerms\":true,\"password\":\"x\"}"))
 					.andExpect(status().isUnauthorized());
 		}
 		mvc.perform(post("/api/auth/login").with(attacker).contentType(MediaType.APPLICATION_JSON)
-						.content("{\"email\":\"niemand@test.de\",\"password\":\"x\"}"))
+						.content("{\"email\":\"niemand@test.de\",\"acceptTerms\":true,\"password\":\"x\"}"))
 				.andExpect(status().isTooManyRequests());
 	}
 
@@ -87,7 +87,7 @@ class RateLimitTests {
 		RequestPostProcessor ip = ip("10.0.3.1");
 		String user = "rl" + UUID.randomUUID().toString().substring(0, 8);
 		String json = mvc.perform(post("/api/auth/register").with(ip("10.0.3.9")).contentType(MediaType.APPLICATION_JSON)
-						.content("{\"email\":\"%s@test.de\",\"password\":\"geheimesPasswort\",\"displayName\":\"%s\"}"
+						.content("{\"email\":\"%s@test.de\",\"acceptTerms\":true,\"password\":\"geheimesPasswort\",\"displayName\":\"%s\"}"
 								.formatted(user, user)))
 				.andExpect(status().isCreated())
 				.andReturn().getResponse().getContentAsString();
@@ -102,14 +102,14 @@ class RateLimitTests {
 				.andExpect(status().isOk());
 		// und kann sich mit seinem eigenen Passwort anmelden
 		mvc.perform(post("/api/auth/login").with(ip).contentType(MediaType.APPLICATION_JSON)
-						.content("{\"email\":\"%s@test.de\",\"password\":\"geheimesPasswort\"}".formatted(user)))
+						.content("{\"email\":\"%s@test.de\",\"acceptTerms\":true,\"password\":\"geheimesPasswort\"}".formatted(user)))
 				.andExpect(status().isOk());
 	}
 
 	@Test
 	void kodierterPfadUmgehtDieSperreNicht() throws Exception {
 		RequestPostProcessor attacker = ip("10.0.4.1");
-		String body = "{\"email\":\"ziel@test.de\",\"password\":\"x\"}";
+		String body = "{\"email\":\"ziel@test.de\",\"acceptTerms\":true,\"password\":\"x\"}";
 		for (int i = 0; i < 6; i++) {
 			mvc.perform(post(java.net.URI.create("/api/auth/%6Cogin")).with(attacker)
 					.contentType(MediaType.APPLICATION_JSON).content(body));
@@ -122,7 +122,7 @@ class RateLimitTests {
 	@Test
 	void antwort429HatCorsHeader() throws Exception {
 		RequestPostProcessor attacker = ip("10.0.5.1");
-		String body = "{\"email\":\"cors@test.de\",\"password\":\"x\"}";
+		String body = "{\"email\":\"cors@test.de\",\"acceptTerms\":true,\"password\":\"x\"}";
 		for (int i = 0; i < 4; i++) {
 			mvc.perform(post("/api/auth/login").with(attacker).header("Origin", "capacitor://localhost")
 					.contentType(MediaType.APPLICATION_JSON).content(body));
@@ -137,7 +137,7 @@ class RateLimitTests {
 	void schreibzugriffeProUserBegrenzt() throws Exception {
 		String user = "rl" + UUID.randomUUID().toString().substring(0, 8);
 		mvc.perform(post("/api/users").with(ip("10.0.6.1")).contentType(MediaType.APPLICATION_JSON)
-						.content("{\"username\":\"%s\",\"email\":\"%s@test.de\",\"password\":\"geheimesPasswort\"}"
+						.content("{\"username\":\"%s\",\"email\":\"%s@test.de\",\"acceptTerms\":true,\"password\":\"geheimesPasswort\"}"
 								.formatted(user, user)))
 				.andExpect(status().isCreated());
 		String spot = "{\"categoryCode\":\"BRATWURST\",\"name\":\"Spam\",\"latitude\":1,\"longitude\":1}";
@@ -158,7 +158,7 @@ class RateLimitTests {
 	private static org.springframework.test.web.servlet.RequestBuilder register(RequestPostProcessor ip) {
 		String name = "rl" + UUID.randomUUID().toString().substring(0, 8);
 		return post("/api/users").with(ip).contentType(MediaType.APPLICATION_JSON)
-				.content("{\"username\":\"%s\",\"email\":\"%s@test.de\",\"password\":\"geheimesPasswort\"}"
+				.content("{\"username\":\"%s\",\"email\":\"%s@test.de\",\"acceptTerms\":true,\"password\":\"geheimesPasswort\"}"
 						.formatted(name, name));
 	}
 
