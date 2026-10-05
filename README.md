@@ -32,7 +32,7 @@ docker compose --profile app up --build   # API auf http://localhost:8080
 | `JWT_VALIDITY` | `PT1H` |
 | `app.rate-limit.registrations-per-hour` | `10` Registrierungen pro IP und Stunde |
 | `app.rate-limit.failed-logins-per-15-minutes` | `10` Fehlversuche pro IP, danach 429 bis zum Fensterende |
-| `CORS_ALLOWED_ORIGINS` | `http://localhost:3000,http://localhost:5173` |
+| `CORS_ALLOWED_ORIGINS` | `http://localhost:8100,http://localhost:4200,capacitor://localhost,https://localhost,http://localhost:3000,http://localhost:5173` |
 
 API-Doku (Swagger UI): http://localhost:8080/swagger-ui.html
 

@@ -338,6 +338,13 @@ class SpotApiTests {
 						.header("Access-Control-Request-Method", "POST"))
 				.andExpect(status().isOk())
 				.andExpect(header().string("Access-Control-Allow-Origin", "http://localhost:5173"));
+		// Ionic-Entwicklungsserver und Capacitor-App auf iOS
+		for (String origin : new String[] {"http://localhost:8100", "capacitor://localhost"}) {
+			mvc.perform(options("/api/spots").header("Origin", origin)
+							.header("Access-Control-Request-Method", "GET"))
+					.andExpect(status().isOk())
+					.andExpect(header().string("Access-Control-Allow-Origin", origin));
+		}
 		mvc.perform(options("/api/spots").header("Origin", "https://boese.example")
 						.header("Access-Control-Request-Method", "POST"))
 				.andExpect(status().isForbidden());
