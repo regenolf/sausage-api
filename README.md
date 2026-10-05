@@ -18,6 +18,7 @@ Lesende `GET`-Endpunkte sind öffentlich, alles andere braucht HTTP Basic Auth.
 |---|---|---|
 | `POST` | `/api/users` | Registrieren (öffentlich) |
 | `GET` | `/api/users/me` | Eigenes Profil 🔒 |
+| `GET` | `/api/users/me/spots` | Eigene Spots, neueste zuerst 🔒 |
 | `GET` | `/api/categories` | Alle Kategorien |
 | `GET` | `/api/spots?category=&q=&page=0&size=20` | Spots paginiert (`content`, `totalElements`, `totalPages`), Suche in Name/Stadt |
 | `GET` | `/api/spots/nearby?latitude=&longitude=&radiusKm=&category=` | Umkreissuche, sortiert nach Entfernung (`distanceKm`) |

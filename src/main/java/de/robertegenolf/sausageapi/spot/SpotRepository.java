@@ -95,6 +95,14 @@ class SpotRepository {
 				.list();
 	}
 
+	List<SpotSummary> findSpotsByCreator(long userId) {
+		String sql = SPOT_SELECT + "WHERE s.created_by = :userId\n" + SPOT_GROUP_BY + "ORDER BY s.created_at DESC, s.id DESC\n";
+		return jdbc.sql(sql)
+				.param("userId", userId)
+				.query(SPOT_SUMMARY)
+				.list();
+	}
+
 	long countSpots(String categoryCode, String search) {
 		return jdbc.sql("""
 				SELECT COUNT(*) FROM spot s

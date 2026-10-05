@@ -11,8 +11,10 @@ import java.util.UUID;
 
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.delete;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
+import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.options;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.put;
+import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.header;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 import static org.springframework.security.test.web.servlet.request.SecurityMockMvcRequestPostProcessors.httpBasic;
@@ -287,6 +289,34 @@ class SpotApiTests {
 		mvc.perform(get("/api/spots/nearby").param("latitude", "95").param("longitude", "6.9"))
 				.andExpect(status().isBadRequest())
 				.andExpect(jsonPath("$.errors.latitude").exists());
+	}
+
+	@Test
+	void meineSpotsZeigtNurEigene() throws Exception {
+		String owner = newName();
+		String other = newName();
+		register(owner);
+		register(other);
+		long spotId = createSpot(owner, "Meine " + owner);
+		createSpot(other, "Fremde " + other);
+
+		mvc.perform(get("/api/users/me/spots"))
+				.andExpect(status().isUnauthorized());
+		mvc.perform(get("/api/users/me/spots").with(httpBasic(owner, PASSWORD)))
+				.andExpect(status().isOk())
+				.andExpect(jsonPath("$.length()").value(1))
+				.andExpect(jsonPath("$[0].id").value(spotId));
+	}
+
+	@Test
+	void corsErlaubtKonfiguriertesFrontend() throws Exception {
+		mvc.perform(options("/api/spots").header("Origin", "http://localhost:5173")
+						.header("Access-Control-Request-Method", "POST"))
+				.andExpect(status().isOk())
+				.andExpect(header().string("Access-Control-Allow-Origin", "http://localhost:5173"));
+		mvc.perform(options("/api/spots").header("Origin", "https://boese.example")
+						.header("Access-Control-Request-Method", "POST"))
+				.andExpect(status().isForbidden());
 	}
 
 	private long createSpot(String username, String name) throws Exception {

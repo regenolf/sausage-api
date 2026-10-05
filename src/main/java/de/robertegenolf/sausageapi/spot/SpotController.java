@@ -62,6 +62,11 @@ class SpotController {
 				repository.countSpots(category, search));
 	}
 
+	@GetMapping("/users/me/spots")
+	List<SpotSummary> mySpots(Authentication auth) {
+		return repository.findSpotsByCreator(currentUserId(auth));
+	}
+
 	@GetMapping("/spots/nearby")
 	List<NearbySpot> nearby(
 			@RequestParam @NotNull @DecimalMin("-90") @DecimalMax("90") Double latitude,

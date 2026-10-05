@@ -1,9 +1,11 @@
 package de.robertegenolf.sausageapi.security;
 
 import de.robertegenolf.sausageapi.user.UserRepository;
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 import org.springframework.http.HttpMethod;
+import org.springframework.security.config.Customizer;
 import org.springframework.security.config.annotation.web.builders.HttpSecurity;
 import org.springframework.security.config.annotation.web.configuration.EnableWebSecurity;
 import org.springframework.security.config.http.SessionCreationPolicy;
@@ -13,6 +15,11 @@ import org.springframework.security.core.userdetails.UsernameNotFoundException;
 import org.springframework.security.crypto.bcrypt.BCryptPasswordEncoder;
 import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.security.web.SecurityFilterChain;
+import org.springframework.web.cors.CorsConfiguration;
+import org.springframework.web.cors.CorsConfigurationSource;
+import org.springframework.web.cors.UrlBasedCorsConfigurationSource;
+
+import java.util.List;
 
 @Configuration
 @EnableWebSecurity
@@ -22,16 +29,34 @@ class SecurityConfig {
 	SecurityFilterChain securityFilterChain(HttpSecurity http) throws Exception {
 		http
 				.csrf(csrf -> csrf.disable())
+				.cors(Customizer.withDefaults())
 				.sessionManagement(session -> session.sessionCreationPolicy(SessionCreationPolicy.STATELESS))
 				.authorizeHttpRequests(auth -> auth
 						.requestMatchers(HttpMethod.POST, "/api/users").permitAll()
-						.requestMatchers(HttpMethod.GET, "/api/users/me", "/api/spots/*/ratings/me").authenticated()
+						.requestMatchers(HttpMethod.GET, "/api/users/me", "/api/users/me/**", "/api/spots/*/ratings/me").authenticated()
 						.requestMatchers(HttpMethod.GET, "/api/**").permitAll()
 						.requestMatchers("/actuator/health/**", "/error").permitAll()
 						.anyRequest().authenticated())
 				.httpBasic(basic -> {
 				});
 		return http.build();
+	}
+
+	/**
+	 * Erlaubt Browser-Frontends von den in {@code app.cors.allowed-origins} konfigurierten Origins.
+	 */
+	@Bean
+	CorsConfigurationSource corsConfigurationSource(
+			@Value("${app.cors.allowed-origins:http://localhost:3000,http://localhost:5173}") List<String> origins) {
+		CorsConfiguration config = new CorsConfiguration();
+		config.setAllowedOrigins(origins);
+		config.setAllowedMethods(List.of("GET", "POST", "PUT", "DELETE", "OPTIONS"));
+		config.setAllowedHeaders(List.of("Authorization", "Content-Type"));
+		config.setExposedHeaders(List.of("Location"));
+		config.setMaxAge(3600L);
+		UrlBasedCorsConfigurationSource source = new UrlBasedCorsConfigurationSource();
+		source.registerCorsConfiguration("/api/**", config);
+		return source;
 	}
 
 	@Bean
