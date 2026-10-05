@@ -35,3 +35,6 @@ build/
 ### Deployment ###
 deploy/.env
 deploy/backups/
+
+### macOS ###
+.DS_Store

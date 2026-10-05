@@ -1,0 +1,18 @@
+# Wöchentliche Pull Requests für Abhängigkeits-Updates (Maven, Docker-Basis-Images, GitHub Actions)
+version: 2
+updates:
+  - package-ecosystem: maven
+    directory: /
+    schedule:
+      interval: weekly
+    groups:
+      spring:
+        patterns: ["org.springframework*", "org.springdoc*"]
+  - package-ecosystem: docker
+    directory: /
+    schedule:
+      interval: weekly
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: weekly
