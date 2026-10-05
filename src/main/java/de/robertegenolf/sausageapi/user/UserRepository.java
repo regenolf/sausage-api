@@ -9,10 +9,10 @@ import java.util.Optional;
 @Repository
 public class UserRepository {
 
-	public record StoredUser(long id, String username, String passwordHash) {
+	public record StoredUser(long id, String username, String passwordHash, String role) {
 	}
 
-	public record UserProfile(long id, String username, String email, Instant createdAt) {
+	public record UserProfile(long id, String username, String email, String role, Instant createdAt) {
 	}
 
 	private final JdbcClient jdbc;
@@ -22,19 +22,26 @@ public class UserRepository {
 	}
 
 	public Optional<StoredUser> findByUsername(String username) {
-		return jdbc.sql("SELECT id, username, password_hash FROM app_user WHERE username = :username AND enabled")
+		return jdbc.sql("SELECT id, username, password_hash, role FROM app_user WHERE username = :username AND enabled")
 				.param("username", username)
 				.query((rs, n) -> new StoredUser(rs.getLong("id"), rs.getString("username"),
-						rs.getString("password_hash")))
+						rs.getString("password_hash"), rs.getString("role")))
 				.optional();
 	}
 
 	Optional<UserProfile> findProfile(String username) {
-		return jdbc.sql("SELECT id, username, email, created_at FROM app_user WHERE username = :username AND enabled")
+		return jdbc.sql("SELECT id, username, email, role, created_at FROM app_user WHERE username = :username AND enabled")
 				.param("username", username)
 				.query((rs, n) -> new UserProfile(rs.getLong("id"), rs.getString("username"),
-						rs.getString("email"), rs.getTimestamp("created_at").toInstant()))
+						rs.getString("email"), rs.getString("role"), rs.getTimestamp("created_at").toInstant()))
 				.optional();
+	}
+
+	void updatePasswordHash(long id, String passwordHash) {
+		jdbc.sql("UPDATE app_user SET password_hash = :passwordHash WHERE id = :id")
+				.param("passwordHash", passwordHash)
+				.param("id", id)
+				.update();
 	}
 
 	long create(String username, String email, String passwordHash) {

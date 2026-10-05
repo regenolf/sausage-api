@@ -33,6 +33,7 @@ class SecurityConfig {
 				.sessionManagement(session -> session.sessionCreationPolicy(SessionCreationPolicy.STATELESS))
 				.authorizeHttpRequests(auth -> auth
 						.requestMatchers(HttpMethod.POST, "/api/users").permitAll()
+						.requestMatchers(HttpMethod.POST, "/api/categories").hasRole("ADMIN")
 						.requestMatchers(HttpMethod.GET, "/api/users/me", "/api/users/me/**", "/api/spots/*/ratings/me").authenticated()
 						.requestMatchers(HttpMethod.GET, "/api/**").permitAll()
 						.requestMatchers("/actuator/health/**", "/error").permitAll()
@@ -70,7 +71,7 @@ class SecurityConfig {
 		return username -> users.findByUsername(username)
 				.map(u -> User.withUsername(u.username())
 						.password(u.passwordHash())
-						.roles("USER")
+						.roles(u.role())
 						.build())
 				.orElseThrow(() -> new UsernameNotFoundException("Unbekannter Benutzer"));
 	}

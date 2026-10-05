@@ -5,6 +5,7 @@ import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.boot.webmvc.test.autoconfigure.AutoConfigureMockMvc;
 import org.springframework.http.MediaType;
+import org.springframework.jdbc.core.simple.JdbcClient;
 import org.springframework.test.web.servlet.MockMvc;
 
 import java.util.UUID;
@@ -31,6 +32,9 @@ class SpotApiTests {
 
 	@Autowired
 	private MockMvc mvc;
+
+	@Autowired
+	private JdbcClient jdbc;
 
 	@Test
 	void registrierungLiefertCreatedUndDoppelteNamenKonflikt() throws Exception {
@@ -325,6 +329,71 @@ class SpotApiTests {
 				.andExpect(status().isOk())
 				.andExpect(jsonPath("$.info.title").value("Sausage API"))
 				.andExpect(jsonPath("$.paths['/api/spots/{id}']").exists());
+	}
+
+	@Test
+	void passwortAendern() throws Exception {
+		String username = newName();
+		register(username);
+
+		mvc.perform(put("/api/users/me/password").with(httpBasic(username, PASSWORD))
+						.contentType(MediaType.APPLICATION_JSON)
+						.content("{\"currentPassword\":\"falsch\",\"newPassword\":\"neuesPasswort1\"}"))
+				.andExpect(status().isBadRequest());
+		mvc.perform(put("/api/users/me/password").with(httpBasic(username, PASSWORD))
+						.contentType(MediaType.APPLICATION_JSON)
+						.content("{\"currentPassword\":\"" + PASSWORD + "\",\"newPassword\":\"neuesPasswort1\"}"))
+				.andExpect(status().isNoContent());
+
+		mvc.perform(get("/api/users/me").with(httpBasic(username, PASSWORD)))
+				.andExpect(status().isUnauthorized());
+		mvc.perform(get("/api/users/me").with(httpBasic(username, "neuesPasswort1")))
+				.andExpect(status().isOk())
+				.andExpect(jsonPath("$.role").value("USER"));
+	}
+
+	@Test
+	void adminModeriertUndVerwaltetKategorien() throws Exception {
+		String user = newName();
+		String admin = newName();
+		register(user);
+		register(admin);
+		jdbc.sql("UPDATE app_user SET role = 'ADMIN' WHERE username = :u").param("u", admin).update();
+
+		long spotId = createSpot(user, "Bude " + user);
+		String comment = mvc.perform(post("/api/spots/" + spotId + "/comments").with(httpBasic(user, PASSWORD))
+						.contentType(MediaType.APPLICATION_JSON).content("{\"text\":\"Spam\"}"))
+				.andReturn().getResponse().getHeader("Location");
+
+		// Admin darf fremde Spots nicht bearbeiten, aber Kommentare und Spots löschen
+		mvc.perform(put("/api/spots/" + spotId).with(httpBasic(admin, PASSWORD))
+						.contentType(MediaType.APPLICATION_JSON).content(spotJson("Admin war hier", 50.9, 6.9)))
+				.andExpect(status().isForbidden());
+		mvc.perform(delete(comment).with(httpBasic(admin, PASSWORD)))
+				.andExpect(status().isNoContent());
+		mvc.perform(delete("/api/spots/" + spotId).with(httpBasic(admin, PASSWORD)))
+				.andExpect(status().isNoContent());
+		mvc.perform(delete("/api/spots/" + spotId).with(httpBasic(admin, PASSWORD)))
+				.andExpect(status().isNotFound());
+
+		String code = "TEST_" + user.toUpperCase();
+		String category = "{\"code\":\"" + code + "\",\"name\":\"Testkategorie\"}";
+		mvc.perform(post("/api/categories").contentType(MediaType.APPLICATION_JSON).content(category))
+				.andExpect(status().isUnauthorized());
+		mvc.perform(post("/api/categories").with(httpBasic(user, PASSWORD))
+						.contentType(MediaType.APPLICATION_JSON).content(category))
+				.andExpect(status().isForbidden());
+		mvc.perform(post("/api/categories").with(httpBasic(admin, PASSWORD))
+						.contentType(MediaType.APPLICATION_JSON).content(category))
+				.andExpect(status().isCreated())
+				.andExpect(jsonPath("$.code").value(code));
+		mvc.perform(post("/api/categories").with(httpBasic(admin, PASSWORD))
+						.contentType(MediaType.APPLICATION_JSON).content(category))
+				.andExpect(status().isConflict());
+		mvc.perform(post("/api/categories").with(httpBasic(admin, PASSWORD))
+						.contentType(MediaType.APPLICATION_JSON).content("{\"code\":\"klein\",\"name\":\"x\"}"))
+				.andExpect(status().isBadRequest())
+				.andExpect(jsonPath("$.errors.code").exists());
 	}
 
 	private long createSpot(String username, String name) throws Exception {

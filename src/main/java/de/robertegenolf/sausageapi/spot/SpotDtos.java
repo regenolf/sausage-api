@@ -6,6 +6,7 @@ import jakarta.validation.constraints.Max;
 import jakarta.validation.constraints.Min;
 import jakarta.validation.constraints.NotBlank;
 import jakarta.validation.constraints.NotNull;
+import jakarta.validation.constraints.Pattern;
 import jakarta.validation.constraints.Size;
 
 import java.math.BigDecimal;
@@ -18,6 +19,13 @@ public final class SpotDtos {
 	}
 
 	public record Category(long id, String code, String name, String description) {
+	}
+
+	public record CategoryRequest(
+			@NotBlank @Size(max = 50) @Pattern(regexp = "[A-Z][A-Z0-9_]*",
+					message = "nur Großbuchstaben, Ziffern und Unterstriche") String code,
+			@NotBlank @Size(max = 100) String name,
+			@Size(max = 500) String description) {
 	}
 
 	public record SpotSummary(long id, String categoryCode, String name, String city,

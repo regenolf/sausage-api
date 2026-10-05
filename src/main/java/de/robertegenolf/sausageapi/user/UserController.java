@@ -11,6 +11,7 @@ import org.springframework.security.core.Authentication;
 import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PostMapping;
+import org.springframework.web.bind.annotation.PutMapping;
 import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RestController;
@@ -29,6 +30,11 @@ class UserController {
 	}
 
 	public record RegisteredUser(long id, String username) {
+	}
+
+	public record ChangePasswordRequest(
+			@NotBlank String currentPassword,
+			@NotBlank @Size(min = 8, max = 100) String newPassword) {
 	}
 
 	private final UserRepository repository;
@@ -56,5 +62,16 @@ class UserController {
 	UserRepository.UserProfile me(Authentication auth) {
 		return repository.findProfile(auth.getName())
 				.orElseThrow(() -> new ResponseStatusException(HttpStatus.UNAUTHORIZED));
+	}
+
+	@PutMapping("/me/password")
+	ResponseEntity<Void> changePassword(@Valid @RequestBody ChangePasswordRequest request, Authentication auth) {
+		UserRepository.StoredUser user = repository.findByUsername(auth.getName())
+				.orElseThrow(() -> new ResponseStatusException(HttpStatus.UNAUTHORIZED));
+		if (!passwordEncoder.matches(request.currentPassword(), user.passwordHash())) {
+			throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "Aktuelles Passwort ist falsch");
+		}
+		repository.updatePasswordHash(user.id(), passwordEncoder.encode(request.newPassword()));
+		return ResponseEntity.noContent().build();
 	}
 }

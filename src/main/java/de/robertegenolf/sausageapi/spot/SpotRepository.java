@@ -1,6 +1,7 @@
 package de.robertegenolf.sausageapi.spot;
 
 import de.robertegenolf.sausageapi.spot.SpotDtos.Category;
+import de.robertegenolf.sausageapi.spot.SpotDtos.CategoryRequest;
 import de.robertegenolf.sausageapi.spot.SpotDtos.Comment;
 import de.robertegenolf.sausageapi.spot.SpotDtos.NearbySpot;
 import de.robertegenolf.sausageapi.spot.SpotDtos.SpotDetail;
@@ -80,6 +81,20 @@ class SpotRepository {
 			  AND (CAST(:search AS varchar) IS NULL OR s.name ILIKE '%' || CAST(:search AS varchar) || '%'
 			       OR s.city ILIKE '%' || CAST(:search AS varchar) || '%')
 			""";
+
+	Category createCategory(CategoryRequest r) {
+		return jdbc.sql("""
+				INSERT INTO category (code, name, description)
+				VALUES (:code, :name, :description)
+				RETURNING id, code, name, description
+				""")
+				.param("code", r.code())
+				.param("name", r.name())
+				.param("description", r.description())
+				.query((rs, n) -> new Category(rs.getLong("id"), rs.getString("code"),
+						rs.getString("name"), rs.getString("description")))
+				.single();
+	}
 
 	List<SpotSummary> findSpots(String categoryCode, String search, int page, int size) {
 		String sql = SPOT_SELECT + SPOT_FILTER + SPOT_GROUP_BY + """

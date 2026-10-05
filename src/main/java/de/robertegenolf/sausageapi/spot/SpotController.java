@@ -1,6 +1,7 @@
 package de.robertegenolf.sausageapi.spot;
 
 import de.robertegenolf.sausageapi.spot.SpotDtos.Category;
+import de.robertegenolf.sausageapi.spot.SpotDtos.CategoryRequest;
 import de.robertegenolf.sausageapi.spot.SpotDtos.Comment;
 import de.robertegenolf.sausageapi.spot.SpotDtos.CommentRequest;
 import de.robertegenolf.sausageapi.spot.SpotDtos.NearbySpot;
@@ -17,6 +18,7 @@ import jakarta.validation.constraints.Max;
 import jakarta.validation.constraints.Min;
 import jakarta.validation.constraints.NotNull;
 import jakarta.validation.constraints.Size;
+import org.springframework.dao.DuplicateKeyException;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
 import org.springframework.security.core.Authentication;
@@ -50,6 +52,17 @@ class SpotController {
 	@GetMapping("/categories")
 	List<Category> categories() {
 		return repository.findCategories();
+	}
+
+	@PostMapping("/categories")
+	ResponseEntity<Category> createCategory(@Valid @RequestBody CategoryRequest request) {
+		try {
+			Category created = repository.createCategory(request);
+			return ResponseEntity.created(URI.create("/api/categories/" + created.id())).body(created);
+		}
+		catch (DuplicateKeyException ex) {
+			throw new ResponseStatusException(HttpStatus.CONFLICT, "Kategorie " + request.code() + " existiert bereits");
+		}
 	}
 
 	@GetMapping("/spots")
@@ -102,7 +115,12 @@ class SpotController {
 	@Transactional
 	@DeleteMapping("/spots/{id}")
 	ResponseEntity<Void> deleteSpot(@PathVariable long id, Authentication auth) {
-		requireSpotOwner(id, currentUserId(auth));
+		if (isAdmin(auth)) {
+			requireSpot(id);
+		}
+		else {
+			requireSpotOwner(id, currentUserId(auth));
+		}
 		repository.deleteSpot(id);
 		return ResponseEntity.noContent().build();
 	}
@@ -151,11 +169,15 @@ class SpotController {
 		long authorId = repository.findCommentAuthor(id, commentId)
 				.orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND,
 						"Kommentar " + commentId + " nicht gefunden"));
-		if (authorId != currentUserId(auth)) {
+		if (!isAdmin(auth) && authorId != currentUserId(auth)) {
 			throw new ResponseStatusException(HttpStatus.FORBIDDEN, "Nur eigene Kommentare dürfen gelöscht werden");
 		}
 		repository.deleteComment(commentId);
 		return ResponseEntity.noContent().build();
+	}
+
+	private static boolean isAdmin(Authentication auth) {
+		return auth.getAuthorities().stream().anyMatch(a -> "ROLE_ADMIN".equals(a.getAuthority()));
 	}
 
 	private void requireSpot(long id) {
