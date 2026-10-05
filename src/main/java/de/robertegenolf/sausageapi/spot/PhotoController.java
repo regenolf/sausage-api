@@ -1,5 +1,6 @@
 package de.robertegenolf.sausageapi.spot;
 
+import de.robertegenolf.sausageapi.spot.SpotDtos.SpotPhoto;
 import de.robertegenolf.sausageapi.user.UserRepository;
 import org.springframework.http.CacheControl;
 import org.springframework.http.HttpStatus;
@@ -29,9 +30,6 @@ class PhotoController {
 
 	static final int MAX_PHOTOS_PER_SPOT = 20;
 
-	public record Photo(long id, String url, String uploadedBy, String contentType, int sizeBytes, Instant createdAt) {
-	}
-
 	private final PhotoRepository photos;
 	private final SpotRepository spots;
 	private final UserRepository users;
@@ -43,12 +41,9 @@ class PhotoController {
 	}
 
 	@GetMapping
-	List<Photo> list(@PathVariable long spotId) {
+	List<SpotPhoto> list(@PathVariable long spotId) {
 		requireSpot(spotId);
-		return photos.findBySpot(spotId).stream()
-				.map(p -> new Photo(p.id(), url(spotId, p.id()), p.username(), p.contentType(), p.sizeBytes(),
-						p.createdAt()))
-				.toList();
+		return photos.findBySpot(spotId);
 	}
 
 	@GetMapping("/{photoId}")
@@ -65,7 +60,7 @@ class PhotoController {
 
 	@Transactional
 	@PostMapping(consumes = MediaType.MULTIPART_FORM_DATA_VALUE)
-	ResponseEntity<Photo> upload(@PathVariable long spotId, @RequestParam("file") MultipartFile file,
+	ResponseEntity<SpotPhoto> upload(@PathVariable long spotId, @RequestParam("file") MultipartFile file,
 			Authentication auth) throws IOException {
 		requireSpot(spotId);
 		if (file.isEmpty()) {
@@ -91,7 +86,8 @@ class PhotoController {
 		}
 		long userId = currentUserId(auth);
 		long id = photos.create(spotId, userId, contentType, data);
-		Photo created = new Photo(id, url(spotId, id), auth.getName(), contentType, data.length, Instant.now());
+		SpotPhoto created = new SpotPhoto(id, PhotoRepository.url(spotId, id), auth.getName(), contentType,
+				data.length, Instant.now());
 		return ResponseEntity.created(URI.create(created.url())).body(created);
 	}
 
@@ -135,10 +131,6 @@ class PhotoController {
 		return users.findByUsername(auth.getName())
 				.map(UserRepository.StoredUser::id)
 				.orElseThrow(() -> new ResponseStatusException(HttpStatus.UNAUTHORIZED));
-	}
-
-	private static String url(long spotId, long photoId) {
-		return "/api/spots/" + spotId + "/photos/" + photoId;
 	}
 
 	private static ResponseStatusException photoNotFound(long photoId) {

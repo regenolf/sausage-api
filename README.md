@@ -44,12 +44,13 @@ Die GitHub-Actions-CI (`.github/workflows/ci.yml`) führt `./mvnw verify` aus.
 
 ## API
 
-Lesende `GET`-Endpunkte sind öffentlich, alles andere braucht Anmeldung – entweder per HTTP Basic Auth
+Lesende `GET`-Endpunkte sind öffentlich, alles andere braucht Anmeldung (Frontend: `regenolf/sausage-app`) – entweder per HTTP Basic Auth
 oder per JWT:
 
 ```bash
-curl -u name:passwort -X POST http://localhost:8080/api/auth/token
-# {"accessToken":"eyJ...","tokenType":"Bearer","expiresIn":3600}
+curl -X POST http://localhost:8080/api/auth/login -H 'Content-Type: application/json' \
+     -d '{"email":"ich@example.de","password":"geheim123"}'   # E-Mail oder Benutzername
+# {"token":"eyJ...","accessToken":"eyJ...","tokenType":"Bearer","expiresIn":3600}
 curl -H "Authorization: Bearer eyJ..." http://localhost:8080/api/users/me
 ```
 
@@ -59,6 +60,8 @@ Passwortänderung bis zum Ablauf.
 | Methode | Pfad | Beschreibung |
 |---|---|---|
 | `POST` | `/api/users` | Registrieren (öffentlich) |
+| `POST` | `/api/auth/register` | Registrieren und direkt anmelden (`email`, `password`, `displayName`) → Token |
+| `POST` | `/api/auth/login` | Anmelden (`email` oder Benutzername, `password`) → Token |
 | `POST` | `/api/auth/token` | JWT holen (mit Basic Auth oder gültigem Token) 🔒 |
 | `GET` | `/api/users/me` | Eigenes Profil 🔒 |
 | `GET` | `/api/users/me/spots` | Eigene Spots, neueste zuerst 🔒 |
@@ -66,13 +69,16 @@ Passwortänderung bis zum Ablauf.
 | `PUT` | `/api/users/me/password` | Passwort ändern (`currentPassword`, `newPassword`) 🔒 |
 | `GET` | `/api/categories` | Alle Kategorien |
 | `POST` | `/api/categories` | Kategorie anlegen 🔒 (nur Admin) |
-| `GET` | `/api/spots?category=&q=&page=0&size=20` | Spots paginiert (`content`, `totalElements`, `totalPages`), Suche in Name/Stadt |
+| `GET` | `/api/spots?category=&q=&page=&size=` | Spots als Liste, Suche in Name/Stadt; mit `size` seitenweise, Gesamtzahl im Header `X-Total-Count` |
 | `GET` | `/api/spots/nearby?latitude=&longitude=&radiusKm=&category=` | Umkreissuche, sortiert nach Entfernung (`distanceKm`) |
-| `GET` | `/api/spots/{id}` | Spot-Details inkl. Durchschnittsbewertung und Ersteller |
+| `GET` | `/api/spots/{id}` | Spot-Details inkl. Durchschnittsbewertung, Ersteller und `photos` |
 | `POST` | `/api/spots` | Spot anlegen 🔒 |
 | `PUT` | `/api/spots/{id}` | Spot bearbeiten 🔒 (nur Ersteller) |
 | `DELETE` | `/api/spots/{id}` | Spot inkl. Bewertungen/Kommentaren löschen 🔒 (Ersteller oder Admin) |
-| `POST` | `/api/spots/{id}/ratings` | Bewerten (1–5), erneutes Bewerten überschreibt 🔒 |
+| `GET` | `/api/spots/{id}/ratings` | Bewertungen (`score`, `comment`, `author`, `authorName`), neueste zuerst |
+| `POST` | `/api/spots/{id}/ratings` | Bewerten (`score` 1–5, optional `comment`), erneutes Bewerten überschreibt → Spot 🔒 |
+| `PUT` | `/api/spots/{id}/ratings/{ratingId}` | Eigene Bewertung ändern → Spot 🔒 |
+| `DELETE` | `/api/spots/{id}/ratings/{ratingId}` | Bewertung löschen (Verfasser oder Admin) → Spot 🔒 |
 | `GET` | `/api/spots/{id}/ratings/me` | Eigene Bewertung 🔒 |
 | `DELETE` | `/api/spots/{id}/ratings/me` | Eigene Bewertung zurücknehmen 🔒 |
 | `GET` | `/api/spots/{id}/photos` | Fotos eines Spots (Metadaten mit `url`) |

@@ -5,7 +5,7 @@ import de.robertegenolf.sausageapi.spot.SpotDtos.CategoryRequest;
 import de.robertegenolf.sausageapi.spot.SpotDtos.Comment;
 import de.robertegenolf.sausageapi.spot.SpotDtos.CommentRequest;
 import de.robertegenolf.sausageapi.spot.SpotDtos.NearbySpot;
-import de.robertegenolf.sausageapi.spot.SpotDtos.Page;
+import de.robertegenolf.sausageapi.spot.SpotDtos.Rating;
 import de.robertegenolf.sausageapi.spot.SpotDtos.RatingRequest;
 import de.robertegenolf.sausageapi.spot.SpotDtos.SpotDetail;
 import de.robertegenolf.sausageapi.spot.SpotDtos.SpotRequest;
@@ -42,10 +42,12 @@ import java.util.List;
 class SpotController {
 
 	private final SpotRepository repository;
+	private final PhotoRepository photos;
 	private final UserRepository users;
 
-	SpotController(SpotRepository repository, UserRepository users) {
+	SpotController(SpotRepository repository, PhotoRepository photos, UserRepository users) {
 		this.repository = repository;
+		this.photos = photos;
 		this.users = users;
 	}
 
@@ -65,14 +67,22 @@ class SpotController {
 		}
 	}
 
+	/**
+	 * Alle Spots als Liste; mit {@code size} (und optional {@code page}) seitenweise.
+	 * Die Gesamtzahl der Treffer steht im Header {@code X-Total-Count}.
+	 */
 	@GetMapping("/spots")
-	Page<SpotSummary> spots(@RequestParam(required = false) String category,
+	ResponseEntity<List<SpotSummary>> spots(@RequestParam(required = false) String category,
 			@RequestParam(required = false) @Size(max = 150) String q,
 			@RequestParam(defaultValue = "0") @Min(0) int page,
-			@RequestParam(defaultValue = "20") @Min(1) @Max(100) int size) {
+			@RequestParam(required = false) @Min(1) @Max(100) Integer size) {
 		String search = q == null || q.isBlank() ? null : q.trim();
-		return Page.of(repository.findSpots(category, search, page, size), page, size,
-				repository.countSpots(category, search));
+		List<SpotSummary> spots = size == null
+				? repository.findSpots(category, search, null, 0)
+				: repository.findSpots(category, search, size, (long) page * size);
+		return ResponseEntity.ok()
+				.header("X-Total-Count", String.valueOf(repository.countSpots(category, search)))
+				.body(spots);
 	}
 
 	@GetMapping("/users/me/spots")
@@ -91,15 +101,14 @@ class SpotController {
 
 	@GetMapping("/spots/{id}")
 	SpotDetail spot(@PathVariable long id) {
-		return repository.findSpot(id)
-				.orElseThrow(() -> notFound(id));
+		return detail(id);
 	}
 
 	@PostMapping("/spots")
 	ResponseEntity<SpotDetail> createSpot(@Valid @RequestBody SpotRequest request, Authentication auth) {
 		requireCategory(request.categoryCode());
 		long id = repository.createSpot(request, currentUserId(auth));
-		SpotDetail created = repository.findSpot(id).orElseThrow(() -> notFound(id));
+		SpotDetail created = detail(id);
 		return ResponseEntity.created(URI.create("/api/spots/" + id)).body(created);
 	}
 
@@ -109,7 +118,7 @@ class SpotController {
 		requireSpotOwner(id, currentUserId(auth));
 		requireCategory(request.categoryCode());
 		repository.updateSpot(id, request);
-		return repository.findSpot(id).orElseThrow(() -> notFound(id));
+		return detail(id);
 	}
 
 	@Transactional
@@ -125,19 +134,25 @@ class SpotController {
 		return ResponseEntity.noContent().build();
 	}
 
+	/** Bewertet (oder überschreibt die eigene Bewertung) und liefert den aktualisierten Spot. */
+	@Transactional
 	@PostMapping("/spots/{id}/ratings")
-	ResponseEntity<Void> rate(@PathVariable long id, @Valid @RequestBody RatingRequest request,
-			Authentication auth) {
+	SpotDetail rate(@PathVariable long id, @Valid @RequestBody RatingRequest request, Authentication auth) {
 		requireSpot(id);
-		repository.upsertRating(id, currentUserId(auth), request.score());
-		return ResponseEntity.noContent().build();
+		repository.upsertRating(id, currentUserId(auth), request.score(), blankToNull(request.comment()));
+		return detail(id);
+	}
+
+	@GetMapping("/spots/{id}/ratings")
+	List<Rating> ratings(@PathVariable long id) {
+		requireSpot(id);
+		return repository.findRatings(id);
 	}
 
 	@GetMapping("/spots/{id}/ratings/me")
-	RatingRequest myRating(@PathVariable long id, Authentication auth) {
+	Rating myRating(@PathVariable long id, Authentication auth) {
 		requireSpot(id);
 		return repository.findRating(id, currentUserId(auth))
-				.map(RatingRequest::new)
 				.orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND,
 						"Spot " + id + " wurde noch nicht bewertet"));
 	}
@@ -147,6 +162,27 @@ class SpotController {
 		requireSpot(id);
 		repository.deleteRating(id, currentUserId(auth));
 		return ResponseEntity.noContent().build();
+	}
+
+	@Transactional
+	@PutMapping("/spots/{id}/ratings/{ratingId}")
+	SpotDetail updateRating(@PathVariable long id, @PathVariable long ratingId,
+			@Valid @RequestBody RatingRequest request, Authentication auth) {
+		if (requireRatingAuthor(id, ratingId) != currentUserId(auth)) {
+			throw new ResponseStatusException(HttpStatus.FORBIDDEN, "Nur eigene Bewertungen dürfen geändert werden");
+		}
+		repository.updateRating(ratingId, request.score(), blankToNull(request.comment()));
+		return detail(id);
+	}
+
+	@Transactional
+	@DeleteMapping("/spots/{id}/ratings/{ratingId}")
+	SpotDetail deleteRating(@PathVariable long id, @PathVariable long ratingId, Authentication auth) {
+		if (!isAdmin(auth) && requireRatingAuthor(id, ratingId) != currentUserId(auth)) {
+			throw new ResponseStatusException(HttpStatus.FORBIDDEN, "Nur eigene Bewertungen dürfen gelöscht werden");
+		}
+		repository.deleteRatingById(ratingId);
+		return detail(id);
 	}
 
 	@GetMapping("/spots/{id}/comments")
@@ -174,6 +210,22 @@ class SpotController {
 		}
 		repository.deleteComment(commentId);
 		return ResponseEntity.noContent().build();
+	}
+
+	private SpotDetail detail(long id) {
+		return repository.findSpot(id)
+				.map(spot -> spot.withPhotos(photos.findBySpot(id)))
+				.orElseThrow(() -> notFound(id));
+	}
+
+	private long requireRatingAuthor(long spotId, long ratingId) {
+		return repository.findRatingAuthor(spotId, ratingId)
+				.orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND,
+						"Bewertung " + ratingId + " nicht gefunden"));
+	}
+
+	private static String blankToNull(String text) {
+		return text == null || text.isBlank() ? null : text.trim();
 	}
 
 	private static boolean isAdmin(Authentication auth) {

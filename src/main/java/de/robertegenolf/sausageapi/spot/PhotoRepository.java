@@ -1,17 +1,14 @@
 package de.robertegenolf.sausageapi.spot;
 
+import de.robertegenolf.sausageapi.spot.SpotDtos.SpotPhoto;
 import org.springframework.jdbc.core.simple.JdbcClient;
 import org.springframework.stereotype.Repository;
 
-import java.time.Instant;
 import java.util.List;
 import java.util.Optional;
 
 @Repository
 class PhotoRepository {
-
-	record PhotoMeta(long id, long spotId, String username, String contentType, int sizeBytes, Instant createdAt) {
-	}
 
 	record PhotoData(String contentType, byte[] data) {
 	}
@@ -37,7 +34,7 @@ class PhotoRepository {
 				.single();
 	}
 
-	List<PhotoMeta> findBySpot(long spotId) {
+	List<SpotPhoto> findBySpot(long spotId) {
 		return jdbc.sql("""
 				SELECT p.id, p.spot_id, u.username, p.content_type, p.size_bytes, p.created_at
 				FROM spot_photo p
@@ -46,8 +43,8 @@ class PhotoRepository {
 				ORDER BY p.created_at, p.id
 				""")
 				.param("spotId", spotId)
-				.query((rs, n) -> new PhotoMeta(rs.getLong("id"), rs.getLong("spot_id"), rs.getString("username"),
-						rs.getString("content_type"), rs.getInt("size_bytes"),
+				.query((rs, n) -> new SpotPhoto(rs.getLong("id"), url(spotId, rs.getLong("id")),
+						rs.getString("username"), rs.getString("content_type"), rs.getInt("size_bytes"),
 						rs.getTimestamp("created_at").toInstant()))
 				.list();
 	}
@@ -74,6 +71,10 @@ class PhotoRepository {
 				.param("spotId", spotId)
 				.query(Long.class)
 				.single();
+	}
+
+	static String url(long spotId, long photoId) {
+		return "/api/spots/" + spotId + "/photos/" + photoId;
 	}
 
 	void delete(long photoId) {

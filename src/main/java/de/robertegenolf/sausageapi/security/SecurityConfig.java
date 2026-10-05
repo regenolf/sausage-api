@@ -32,7 +32,7 @@ class SecurityConfig {
 				.cors(Customizer.withDefaults())
 				.sessionManagement(session -> session.sessionCreationPolicy(SessionCreationPolicy.STATELESS))
 				.authorizeHttpRequests(auth -> auth
-						.requestMatchers(HttpMethod.POST, "/api/users").permitAll()
+						.requestMatchers(HttpMethod.POST, "/api/users", "/api/auth/login", "/api/auth/register").permitAll()
 						.requestMatchers(HttpMethod.POST, "/api/categories").hasRole("ADMIN")
 						.requestMatchers(HttpMethod.GET, "/api/users/me", "/api/users/me/**", "/api/spots/*/ratings/me").authenticated()
 						.requestMatchers(HttpMethod.GET, "/api/**").permitAll()
@@ -55,7 +55,7 @@ class SecurityConfig {
 		config.setAllowedOrigins(origins);
 		config.setAllowedMethods(List.of("GET", "POST", "PUT", "DELETE", "OPTIONS"));
 		config.setAllowedHeaders(List.of("Authorization", "Content-Type"));
-		config.setExposedHeaders(List.of("Location"));
+		config.setExposedHeaders(List.of("Location", "X-Total-Count", "Retry-After"));
 		config.setMaxAge(3600L);
 		UrlBasedCorsConfigurationSource source = new UrlBasedCorsConfigurationSource();
 		source.registerCorsConfiguration("/api/**", config);

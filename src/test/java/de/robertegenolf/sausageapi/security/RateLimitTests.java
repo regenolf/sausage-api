@@ -60,9 +60,26 @@ class RateLimitTests {
 				.andExpect(status().isTooManyRequests());
 		// öffentliche Endpunkte ohne Anmeldung gehen weiter
 		mvc.perform(get("/api/categories").with(attacker)).andExpect(status().isOk());
+		// auch die JSON-Anmeldung ist gesperrt …
+		mvc.perform(post("/api/auth/login").with(attacker).contentType(MediaType.APPLICATION_JSON)
+						.content("{\"email\":\"%s\",\"password\":\"geheimesPasswort\"}".formatted(username)))
+				.andExpect(status().isTooManyRequests());
 		// der echte User von seiner IP auch
 		mvc.perform(get("/api/users/me").with(ip("10.0.1.3")).with(httpBasic(username, "geheimesPasswort")))
 				.andExpect(status().isOk());
+	}
+
+	@Test
+	void fehlgeschlageneJsonLoginsZaehlen() throws Exception {
+		RequestPostProcessor attacker = ip("10.0.2.1");
+		for (int i = 0; i < 3; i++) {
+			mvc.perform(post("/api/auth/login").with(attacker).contentType(MediaType.APPLICATION_JSON)
+							.content("{\"email\":\"niemand@test.de\",\"password\":\"x\"}"))
+					.andExpect(status().isUnauthorized());
+		}
+		mvc.perform(post("/api/auth/login").with(attacker).contentType(MediaType.APPLICATION_JSON)
+						.content("{\"email\":\"niemand@test.de\",\"password\":\"x\"}"))
+				.andExpect(status().isTooManyRequests());
 	}
 
 	private static org.springframework.test.web.servlet.RequestBuilder register(RequestPostProcessor ip) {

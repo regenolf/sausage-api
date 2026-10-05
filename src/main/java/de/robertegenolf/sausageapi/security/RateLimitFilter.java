@@ -50,13 +50,16 @@ class RateLimitFilter extends OncePerRequestFilter {
 	protected void doFilterInternal(HttpServletRequest request, HttpServletResponse response, FilterChain chain)
 			throws ServletException, IOException {
 		String ip = request.getRemoteAddr();
-		boolean login = request.getHeader(HttpHeaders.AUTHORIZATION) != null;
+		boolean post = "POST".equals(request.getMethod());
+		String path = request.getRequestURI();
+		boolean login = request.getHeader(HttpHeaders.AUTHORIZATION) != null
+				|| post && "/api/auth/login".equals(path);
 
 		if (login && failedLogins.isBlocked(ip)) {
 			reject(response, failedLogins.secondsUntilReset(ip), "Zu viele fehlgeschlagene Anmeldeversuche");
 			return;
 		}
-		if ("POST".equals(request.getMethod()) && "/api/users".equals(request.getRequestURI())
+		if (post && ("/api/users".equals(path) || "/api/auth/register".equals(path))
 				&& !registrations.tryAcquire(ip)) {
 			reject(response, registrations.secondsUntilReset(ip), "Zu viele Registrierungen");
 			return;

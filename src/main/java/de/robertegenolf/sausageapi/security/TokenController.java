@@ -1,57 +1,91 @@
 package de.robertegenolf.sausageapi.security;
 
-import org.springframework.beans.factory.annotation.Value;
+import de.robertegenolf.sausageapi.user.UserRepository;
+import jakarta.validation.Valid;
+import jakarta.validation.constraints.Email;
+import jakarta.validation.constraints.NotBlank;
+import jakarta.validation.constraints.Size;
+import org.springframework.dao.DuplicateKeyException;
+import org.springframework.http.HttpStatus;
+import org.springframework.http.ResponseEntity;
 import org.springframework.security.core.Authentication;
 import org.springframework.security.core.GrantedAuthority;
-import org.springframework.security.oauth2.jose.jws.MacAlgorithm;
-import org.springframework.security.oauth2.jwt.JwsHeader;
-import org.springframework.security.oauth2.jwt.JwtClaimsSet;
-import org.springframework.security.oauth2.jwt.JwtEncoder;
-import org.springframework.security.oauth2.jwt.JwtEncoderParameters;
+import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.web.bind.annotation.PostMapping;
+import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RestController;
+import org.springframework.web.server.ResponseStatusException;
 
-import java.time.Duration;
-import java.time.Instant;
+import java.net.URI;
 import java.util.List;
 
 /**
- * Tauscht Benutzername/Passwort (HTTP Basic) gegen ein JWT, das danach als
- * {@code Authorization: Bearer <token>} mitgeschickt wird.
+ * Anmeldung per JWT. Das Token wird danach als {@code Authorization: Bearer <token>} mitgeschickt.
  */
 @RestController
 @RequestMapping("/api/auth")
 class TokenController {
 
-	public record TokenResponse(String accessToken, String tokenType, long expiresIn) {
+	public record TokenResponse(String token, String accessToken, String tokenType, long expiresIn) {
+
+		static TokenResponse of(TokenService.IssuedToken issued) {
+			return new TokenResponse(issued.token(), issued.token(), "Bearer", issued.expiresIn());
+		}
 	}
 
-	private final JwtEncoder encoder;
-	private final Duration validity;
-
-	TokenController(JwtEncoder encoder, @Value("${app.jwt.validity:PT1H}") Duration validity) {
-		this.encoder = encoder;
-		this.validity = validity;
+	/** {@code email} darf auch der Benutzername sein. */
+	public record LoginRequest(@NotBlank String email, @NotBlank String password) {
 	}
 
+	public record RegisterRequest(
+			@NotBlank @Email @Size(max = 255) String email,
+			@NotBlank @Size(min = 8, max = 100) String password,
+			@NotBlank @Size(min = 3, max = 50) String displayName) {
+	}
+
+	private final TokenService tokens;
+	private final UserRepository users;
+	private final PasswordEncoder passwordEncoder;
+
+	TokenController(TokenService tokens, UserRepository users, PasswordEncoder passwordEncoder) {
+		this.tokens = tokens;
+		this.users = users;
+		this.passwordEncoder = passwordEncoder;
+	}
+
+	/** Tauscht HTTP-Basic-Login (oder ein noch gültiges Token) gegen ein neues JWT. */
 	@PostMapping("/token")
 	TokenResponse token(Authentication auth) {
-		Instant now = Instant.now();
 		List<String> roles = auth.getAuthorities().stream()
 				.map(GrantedAuthority::getAuthority)
 				.filter(a -> a.startsWith("ROLE_"))
 				.map(a -> a.substring("ROLE_".length()))
 				.toList();
-		JwtClaimsSet claims = JwtClaimsSet.builder()
-				.issuer("sausage-api")
-				.issuedAt(now)
-				.expiresAt(now.plus(validity))
-				.subject(auth.getName())
-				.claim(JwtConfig.ROLES_CLAIM, roles)
-				.build();
-		String token = encoder.encode(JwtEncoderParameters.from(JwsHeader.with(MacAlgorithm.HS256).build(), claims))
-				.getTokenValue();
-		return new TokenResponse(token, "Bearer", validity.toSeconds());
+		return TokenResponse.of(tokens.issue(auth.getName(), roles));
+	}
+
+	/** Anmeldung mit E-Mail (oder Benutzername) und Passwort im JSON-Body. */
+	@PostMapping("/login")
+	TokenResponse login(@Valid @RequestBody LoginRequest request) {
+		UserRepository.StoredUser user = users.findByLogin(request.email().trim())
+				.filter(u -> passwordEncoder.matches(request.password(), u.passwordHash()))
+				.orElseThrow(() -> new ResponseStatusException(HttpStatus.UNAUTHORIZED,
+						"E-Mail oder Passwort ist falsch"));
+		return TokenResponse.of(tokens.issue(user.username(), List.of(user.role())));
+	}
+
+	/** Registriert einen Account (Anzeigename = Benutzername) und meldet direkt an. */
+	@PostMapping("/register")
+	ResponseEntity<TokenResponse> register(@Valid @RequestBody RegisterRequest request) {
+		String username = request.displayName().trim();
+		try {
+			long id = users.create(username, request.email().trim(), passwordEncoder.encode(request.password()));
+			return ResponseEntity.created(URI.create("/api/users/" + id))
+					.body(TokenResponse.of(tokens.issue(username, List.of("USER"))));
+		}
+		catch (DuplicateKeyException ex) {
+			throw new ResponseStatusException(HttpStatus.CONFLICT, "Anzeigename oder E-Mail ist bereits vergeben");
+		}
 	}
 }

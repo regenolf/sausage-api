@@ -29,6 +29,20 @@ public class UserRepository {
 				.optional();
 	}
 
+	/** Sucht per Benutzername oder E-Mail (Groß-/Kleinschreibung der E-Mail egal). */
+	public Optional<StoredUser> findByLogin(String login) {
+		return jdbc.sql("""
+				SELECT id, username, password_hash, role FROM app_user
+				WHERE (username = :login OR lower(email) = lower(:login)) AND enabled
+				ORDER BY (username = :login) DESC
+				LIMIT 1
+				""")
+				.param("login", login)
+				.query((rs, n) -> new StoredUser(rs.getLong("id"), rs.getString("username"),
+						rs.getString("password_hash"), rs.getString("role")))
+				.optional();
+	}
+
 	Optional<UserProfile> findProfile(String username) {
 		return jdbc.sql("SELECT id, username, email, role, created_at FROM app_user WHERE username = :username AND enabled")
 				.param("username", username)
@@ -50,7 +64,7 @@ public class UserRepository {
 				.update();
 	}
 
-	long create(String username, String email, String passwordHash) {
+	public long create(String username, String email, String passwordHash) {
 		return jdbc.sql("""
 				INSERT INTO app_user (username, email, password_hash)
 				VALUES (:username, :email, :passwordHash)

@@ -16,6 +16,7 @@ import javax.imageio.ImageIO;
 import java.awt.image.BufferedImage;
 import java.io.ByteArrayOutputStream;
 import java.util.Arrays;
+import java.util.List;
 import java.util.UUID;
 
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.delete;
@@ -89,10 +90,10 @@ class SpotApiTests {
 
 		mvc.perform(post("/api/spots/" + spotId + "/ratings").with(httpBasic(username, "geheimesPasswort"))
 						.contentType(MediaType.APPLICATION_JSON).content("{\"score\":4}"))
-				.andExpect(status().isNoContent());
+				.andExpect(status().isOk());
 		mvc.perform(post("/api/spots/" + spotId + "/ratings").with(httpBasic(username, "geheimesPasswort"))
 						.contentType(MediaType.APPLICATION_JSON).content("{\"score\":2}"))
-				.andExpect(status().isNoContent());
+				.andExpect(status().isOk());
 
 		mvc.perform(get("/api/spots/" + spotId))
 				.andExpect(status().isOk())
@@ -172,7 +173,7 @@ class SpotApiTests {
 		// Bewertungen und Kommentare anderer User dürfen das Löschen nicht blockieren
 		mvc.perform(post("/api/spots/" + spotId + "/ratings").with(httpBasic(other, PASSWORD))
 						.contentType(MediaType.APPLICATION_JSON).content("{\"score\":5}"))
-				.andExpect(status().isNoContent());
+				.andExpect(status().isOk());
 		mvc.perform(post("/api/spots/" + spotId + "/comments").with(httpBasic(other, PASSWORD))
 						.contentType(MediaType.APPLICATION_JSON).content("{\"text\":\"Super\"}"))
 				.andExpect(status().isCreated());
@@ -201,7 +202,7 @@ class SpotApiTests {
 
 		mvc.perform(post("/api/spots/" + spotId + "/ratings").with(httpBasic(username, PASSWORD))
 						.contentType(MediaType.APPLICATION_JSON).content("{\"score\":3}"))
-				.andExpect(status().isNoContent());
+				.andExpect(status().isOk());
 		mvc.perform(get("/api/spots/" + spotId + "/ratings/me").with(httpBasic(username, PASSWORD)))
 				.andExpect(status().isOk())
 				.andExpect(jsonPath("$.score").value(3));
@@ -278,18 +279,22 @@ class SpotApiTests {
 			createSpot(username, "Suche " + username + " " + i);
 		}
 
+		mvc.perform(get("/api/spots").param("q", username))
+				.andExpect(status().isOk())
+				.andExpect(jsonPath("$.length()").value(3))
+				.andExpect(header().string("X-Total-Count", "3"));
 		mvc.perform(get("/api/spots").param("q", username).param("size", "2"))
 				.andExpect(status().isOk())
-				.andExpect(jsonPath("$.content.length()").value(2))
-				.andExpect(jsonPath("$.content[0].name").value("Suche " + username + " 1"))
-				.andExpect(jsonPath("$.totalElements").value(3))
-				.andExpect(jsonPath("$.totalPages").value(2));
+				.andExpect(jsonPath("$.length()").value(2))
+				.andExpect(jsonPath("$[0].name").value("Suche " + username + " 1"))
+				.andExpect(header().string("X-Total-Count", "3"));
 		mvc.perform(get("/api/spots").param("q", username.toUpperCase()).param("size", "2").param("page", "1"))
 				.andExpect(status().isOk())
-				.andExpect(jsonPath("$.content.length()").value(1))
-				.andExpect(jsonPath("$.content[0].name").value("Suche " + username + " 3"));
+				.andExpect(jsonPath("$.length()").value(1))
+				.andExpect(jsonPath("$[0].name").value("Suche " + username + " 3"));
 		mvc.perform(get("/api/spots").param("q", "%" + username))
-				.andExpect(jsonPath("$.totalElements").value(0));
+				.andExpect(jsonPath("$").isEmpty())
+				.andExpect(header().string("X-Total-Count", "0"));
 	}
 
 	@Test
@@ -492,6 +497,8 @@ class SpotApiTests {
 				.andExpect(status().isOk())
 				.andExpect(jsonPath("$[0].url").value(location))
 				.andExpect(jsonPath("$[0].sizeBytes").value(png.length));
+		mvc.perform(get("/api/spots/" + spotId))
+				.andExpect(jsonPath("$.photos[0].url").value(location));
 		mvc.perform(get(location))
 				.andExpect(status().isOk())
 				.andExpect(header().string("Content-Type", "image/png"))
@@ -552,6 +559,91 @@ class SpotApiTests {
 		mvc.perform(put("/api/spots/" + ownSpot).with(httpBasic(leaver, PASSWORD))
 						.contentType(MediaType.APPLICATION_JSON).content(spotJson("Übernahme", 50.9, 6.9)))
 				.andExpect(status().isForbidden());
+	}
+
+	@Test
+	void loginUndRegistrierungWieImFrontend() throws Exception {
+		String name = newName();
+		String email = name + "@frontend.de";
+
+		String json = mvc.perform(post("/api/auth/register").contentType(MediaType.APPLICATION_JSON)
+						.content("{\"email\":\"%s\",\"password\":\"%s\",\"displayName\":\"%s\"}"
+								.formatted(email, PASSWORD, name)))
+				.andExpect(status().isCreated())
+				.andExpect(jsonPath("$.token").exists())
+				.andReturn().getResponse().getContentAsString();
+		String registered = JsonPath.read(json, "$.token");
+		mvc.perform(get("/api/users/me").header("Authorization", "Bearer " + registered))
+				.andExpect(status().isOk())
+				.andExpect(jsonPath("$.username").value(name))
+				.andExpect(jsonPath("$.email").value(email));
+
+		mvc.perform(post("/api/auth/register").contentType(MediaType.APPLICATION_JSON)
+						.content("{\"email\":\"%s\",\"password\":\"%s\",\"displayName\":\"anders%s\"}"
+								.formatted(email, PASSWORD, name)))
+				.andExpect(status().isConflict());
+
+		// Anmeldung mit E-Mail (Groß-/Kleinschreibung egal) oder Benutzername
+		for (String login : new String[] {email.toUpperCase(), name}) {
+			String loginJson = mvc.perform(post("/api/auth/login").contentType(MediaType.APPLICATION_JSON)
+							.content("{\"email\":\"%s\",\"password\":\"%s\"}".formatted(login, PASSWORD)))
+					.andExpect(status().isOk())
+					.andReturn().getResponse().getContentAsString();
+			String token = JsonPath.read(loginJson, "$.token");
+			String payload = new String(java.util.Base64.getUrlDecoder().decode(token.split("\\.")[1]));
+			org.assertj.core.api.Assertions.assertThat(JsonPath.<String>read(payload, "$.sub")).isEqualTo(name);
+			org.assertj.core.api.Assertions.assertThat(JsonPath.<String>read(payload, "$.name")).isEqualTo(name);
+		}
+		mvc.perform(post("/api/auth/login").contentType(MediaType.APPLICATION_JSON)
+						.content("{\"email\":\"%s\",\"password\":\"falsch\"}".formatted(email)))
+				.andExpect(status().isUnauthorized())
+				.andExpect(jsonPath("$.detail").value("E-Mail oder Passwort ist falsch"));
+	}
+
+	@Test
+	void bewertungenMitKommentarWieImFrontend() throws Exception {
+		String owner = newName();
+		String other = newName();
+		register(owner);
+		register(other);
+		long spotId = createSpot(owner, "Bewertet " + owner);
+
+		mvc.perform(post("/api/spots/" + spotId + "/ratings").with(httpBasic(other, PASSWORD))
+						.contentType(MediaType.APPLICATION_JSON).content("{\"score\":5,\"comment\":\"Top Wurst\"}"))
+				.andExpect(status().isOk())
+				.andExpect(jsonPath("$.id").value(spotId))
+				.andExpect(jsonPath("$.averageRating").value(5.0))
+				.andExpect(jsonPath("$.photos").isArray());
+		mvc.perform(post("/api/spots/" + spotId + "/ratings").with(httpBasic(owner, PASSWORD))
+						.contentType(MediaType.APPLICATION_JSON).content("{\"score\":3,\"comment\":\"  \"}"))
+				.andExpect(jsonPath("$.averageRating").value(4.0));
+
+		String json = mvc.perform(get("/api/spots/" + spotId + "/ratings"))
+				.andExpect(status().isOk())
+				.andExpect(jsonPath("$.length()").value(2))
+				.andExpect(jsonPath("$[?(@.author == '" + other + "')].comment").value("Top Wurst"))
+				.andExpect(jsonPath("$[?(@.author == '" + other + "')].authorName").value(other))
+				.andExpect(jsonPath("$[?(@.author == '" + owner + "')].comment").value((Object) null))
+				.andReturn().getResponse().getContentAsString();
+		Integer otherRating = JsonPath.<List<Integer>>read(json, "$[?(@.author == '" + other + "')].id").get(0);
+
+		mvc.perform(put("/api/spots/" + spotId + "/ratings/" + otherRating).with(httpBasic(owner, PASSWORD))
+						.contentType(MediaType.APPLICATION_JSON).content("{\"score\":1}"))
+				.andExpect(status().isForbidden());
+		mvc.perform(put("/api/spots/" + spotId + "/ratings/" + otherRating).with(httpBasic(other, PASSWORD))
+						.contentType(MediaType.APPLICATION_JSON).content("{\"score\":1,\"comment\":\"Doch nicht\"}"))
+				.andExpect(status().isOk())
+				.andExpect(jsonPath("$.averageRating").value(2.0));
+		mvc.perform(get("/api/spots/" + spotId + "/ratings/me").with(httpBasic(other, PASSWORD)))
+				.andExpect(jsonPath("$.comment").value("Doch nicht"));
+
+		mvc.perform(delete("/api/spots/" + spotId + "/ratings/" + otherRating).with(httpBasic(owner, PASSWORD)))
+				.andExpect(status().isForbidden());
+		mvc.perform(delete("/api/spots/" + spotId + "/ratings/" + otherRating).with(httpBasic(other, PASSWORD)))
+				.andExpect(status().isOk())
+				.andExpect(jsonPath("$.ratingCount").value(1));
+		mvc.perform(delete("/api/spots/" + spotId + "/ratings/" + otherRating).with(httpBasic(other, PASSWORD)))
+				.andExpect(status().isNotFound());
 	}
 
 	private String token(String username) throws Exception {

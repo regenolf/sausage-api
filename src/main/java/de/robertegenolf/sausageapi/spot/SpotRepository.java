@@ -4,6 +4,7 @@ import de.robertegenolf.sausageapi.spot.SpotDtos.Category;
 import de.robertegenolf.sausageapi.spot.SpotDtos.CategoryRequest;
 import de.robertegenolf.sausageapi.spot.SpotDtos.Comment;
 import de.robertegenolf.sausageapi.spot.SpotDtos.NearbySpot;
+import de.robertegenolf.sausageapi.spot.SpotDtos.Rating;
 import de.robertegenolf.sausageapi.spot.SpotDtos.SpotDetail;
 import de.robertegenolf.sausageapi.spot.SpotDtos.SpotRequest;
 import de.robertegenolf.sausageapi.spot.SpotDtos.SpotSummary;
@@ -63,7 +64,8 @@ class SpotRepository {
 			averageRating(rs), rs.getLong("rating_count"),
 			rs.getString("created_by"),
 			rs.getTimestamp("created_at").toInstant(),
-			rs.getTimestamp("updated_at").toInstant());
+			rs.getTimestamp("updated_at").toInstant(),
+			List.of());
 
 	private final JdbcClient jdbc;
 
@@ -98,16 +100,17 @@ class SpotRepository {
 				.single();
 	}
 
-	List<SpotSummary> findSpots(String categoryCode, String search, int page, int size) {
+	/** {@code limit == null} liefert alle Treffer. */
+	List<SpotSummary> findSpots(String categoryCode, String search, Integer limit, long offset) {
 		String sql = SPOT_SELECT + SPOT_FILTER + SPOT_GROUP_BY + """
 				ORDER BY s.name, s.id
-				LIMIT :limit OFFSET :offset
+				LIMIT CAST(:limit AS integer) OFFSET :offset
 				""";
 		return jdbc.sql(sql)
 				.param("categoryCode", categoryCode)
 				.param("search", escapeLike(search))
-				.param("limit", size)
-				.param("offset", (long) page * size)
+				.param("limit", limit)
+				.param("offset", offset)
 				.query(SPOT_SUMMARY)
 				.list();
 	}
@@ -258,24 +261,66 @@ class SpotRepository {
 				.single();
 	}
 
-	void upsertRating(long spotId, long userId, int score) {
+	private static final RowMapper<Rating> RATING = (rs, n) -> new Rating(rs.getLong("id"), rs.getInt("score"),
+			rs.getString("comment"), rs.getString("username"), rs.getString("username"),
+			rs.getTimestamp("created_at").toInstant());
+
+	private static final String RATING_SELECT = """
+			SELECT r.id, r.score, r.comment, u.username, r.created_at
+			FROM rating r
+			JOIN app_user u ON u.id = r.user_id
+			""";
+
+	void upsertRating(long spotId, long userId, int score, String comment) {
 		jdbc.sql("""
-				INSERT INTO rating (spot_id, user_id, score)
-				VALUES (:spotId, :userId, :score)
-				ON CONFLICT (spot_id, user_id) DO UPDATE SET score = EXCLUDED.score, created_at = CURRENT_TIMESTAMP
+				INSERT INTO rating (spot_id, user_id, score, comment)
+				VALUES (:spotId, :userId, :score, :comment)
+				ON CONFLICT (spot_id, user_id)
+				DO UPDATE SET score = EXCLUDED.score, comment = EXCLUDED.comment, created_at = CURRENT_TIMESTAMP
 				""")
 				.param("spotId", spotId)
 				.param("userId", userId)
 				.param("score", score)
+				.param("comment", comment)
 				.update();
 	}
 
-	Optional<Integer> findRating(long spotId, long userId) {
-		return jdbc.sql("SELECT score FROM rating WHERE spot_id = :spotId AND user_id = :userId")
+	List<Rating> findRatings(long spotId) {
+		return jdbc.sql(RATING_SELECT + "WHERE r.spot_id = :spotId\nORDER BY r.created_at DESC, r.id DESC\n")
+				.param("spotId", spotId)
+				.query(RATING)
+				.list();
+	}
+
+	Optional<Rating> findRating(long spotId, long userId) {
+		return jdbc.sql(RATING_SELECT + "WHERE r.spot_id = :spotId AND r.user_id = :userId\n")
 				.param("spotId", spotId)
 				.param("userId", userId)
-				.query(Integer.class)
+				.query(RATING)
 				.optional();
+	}
+
+	/** Liefert die User-ID des Verfassers, leer wenn es die Bewertung an diesem Spot nicht gibt. */
+	Optional<Long> findRatingAuthor(long spotId, long ratingId) {
+		return jdbc.sql("SELECT user_id FROM rating WHERE id = :id AND spot_id = :spotId")
+				.param("id", ratingId)
+				.param("spotId", spotId)
+				.query(Long.class)
+				.optional();
+	}
+
+	void updateRating(long ratingId, int score, String comment) {
+		jdbc.sql("UPDATE rating SET score = :score, comment = :comment, created_at = CURRENT_TIMESTAMP WHERE id = :id")
+				.param("score", score)
+				.param("comment", comment)
+				.param("id", ratingId)
+				.update();
+	}
+
+	void deleteRatingById(long ratingId) {
+		jdbc.sql("DELETE FROM rating WHERE id = :id")
+				.param("id", ratingId)
+				.update();
 	}
 
 	boolean deleteRating(long spotId, long userId) {
