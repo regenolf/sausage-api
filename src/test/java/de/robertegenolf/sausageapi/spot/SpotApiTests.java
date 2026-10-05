@@ -9,15 +9,18 @@ import org.springframework.context.annotation.Import;
 import org.springframework.boot.webmvc.test.autoconfigure.AutoConfigureMockMvc;
 import org.springframework.http.MediaType;
 import org.springframework.jdbc.core.simple.JdbcClient;
+import org.springframework.mock.web.MockMultipartFile;
 import org.springframework.test.web.servlet.MockMvc;
 
 import java.util.UUID;
 
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.delete;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
+import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.multipart;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.options;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.put;
+import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.content;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.header;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
@@ -434,6 +437,55 @@ class SpotApiTests {
 						.contentType(MediaType.APPLICATION_JSON)
 						.content("{\"code\":\"" + code + "\",\"name\":\"Per JWT\"}"))
 				.andExpect(status().isCreated());
+	}
+
+	@Test
+	void fotosHochladenAnzeigenUndLoeschen() throws Exception {
+		String owner = newName();
+		String other = newName();
+		register(owner);
+		register(other);
+		long spotId = createSpot(owner, "Foto " + owner);
+		byte[] png = {(byte) 0x89, 'P', 'N', 'G', 0x0D, 0x0A, 0x1A, 0x0A, 0, 0, 0, 0x0D};
+
+		mvc.perform(multipart("/api/spots/" + spotId + "/photos")
+						.file(new MockMultipartFile("file", "bild.png", "image/png", png)))
+				.andExpect(status().isUnauthorized());
+		mvc.perform(multipart("/api/spots/" + spotId + "/photos").with(httpBasic(owner, PASSWORD))
+						.file(new MockMultipartFile("file", "boese.png", "image/png", "<script>".getBytes())))
+				.andExpect(status().isUnsupportedMediaType());
+
+		String location = mvc.perform(multipart("/api/spots/" + spotId + "/photos").with(httpBasic(owner, PASSWORD))
+						.file(new MockMultipartFile("file", "bild.bin", "application/octet-stream", png)))
+				.andExpect(status().isCreated())
+				.andExpect(jsonPath("$.contentType").value("image/png"))
+				.andExpect(jsonPath("$.uploadedBy").value(owner))
+				.andReturn().getResponse().getHeader("Location");
+
+		mvc.perform(get("/api/spots/" + spotId + "/photos"))
+				.andExpect(status().isOk())
+				.andExpect(jsonPath("$[0].url").value(location))
+				.andExpect(jsonPath("$[0].sizeBytes").value(png.length));
+		mvc.perform(get(location))
+				.andExpect(status().isOk())
+				.andExpect(header().string("Content-Type", "image/png"))
+				.andExpect(content().bytes(png));
+
+		mvc.perform(delete(location).with(httpBasic(other, PASSWORD)))
+				.andExpect(status().isForbidden());
+		mvc.perform(delete(location).with(httpBasic(owner, PASSWORD)))
+				.andExpect(status().isNoContent());
+		mvc.perform(get(location))
+				.andExpect(status().isNotFound());
+
+		// Fotos verschwinden mit dem Spot
+		mvc.perform(multipart("/api/spots/" + spotId + "/photos").with(httpBasic(other, PASSWORD))
+						.file(new MockMultipartFile("file", "bild.png", "image/png", png)))
+				.andExpect(status().isCreated());
+		mvc.perform(delete("/api/spots/" + spotId).with(httpBasic(owner, PASSWORD)))
+				.andExpect(status().isNoContent());
+		mvc.perform(get("/api/spots/" + spotId + "/photos"))
+				.andExpect(status().isNotFound());
 	}
 
 	private String token(String username) throws Exception {
