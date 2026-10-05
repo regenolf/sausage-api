@@ -181,6 +181,16 @@ class SpotApiTests {
 
 		mvc.perform(delete("/api/spots/" + spotId).with(httpBasic(other, PASSWORD)))
 				.andExpect(status().isForbidden());
+		// Beiträge anderer darf der Ersteller nicht mitlöschen
+		mvc.perform(delete("/api/spots/" + spotId).with(httpBasic(owner, PASSWORD)))
+				.andExpect(status().isConflict())
+				.andExpect(jsonPath("$.detail").value(org.hamcrest.Matchers.containsString("Moderation")));
+		mvc.perform(delete("/api/spots/" + spotId + "/ratings/me").with(httpBasic(other, PASSWORD)))
+				.andExpect(status().isNoContent());
+		String commentJson = mvc.perform(get("/api/spots/" + spotId + "/comments")).andReturn().getResponse().getContentAsString();
+		Integer commentId = JsonPath.<List<Integer>>read(commentJson, "$[*].id").get(0);
+		mvc.perform(delete("/api/spots/" + spotId + "/comments/" + commentId).with(httpBasic(other, PASSWORD)))
+				.andExpect(status().isNoContent());
 		mvc.perform(delete("/api/spots/" + spotId).with(httpBasic(owner, PASSWORD)))
 				.andExpect(status().isNoContent());
 		mvc.perform(get("/api/spots/" + spotId))
@@ -376,7 +386,8 @@ class SpotApiTests {
 		mvc.perform(put("/api/users/me/password").with(httpBasic(username, PASSWORD))
 						.contentType(MediaType.APPLICATION_JSON)
 						.content("{\"currentPassword\":\"" + PASSWORD + "\",\"newPassword\":\"neuesPasswort1\"}"))
-				.andExpect(status().isNoContent());
+				.andExpect(status().isOk())
+				.andExpect(jsonPath("$.token").exists());
 
 		mvc.perform(get("/api/users/me").with(httpBasic(username, PASSWORD)))
 				.andExpect(status().isUnauthorized());
@@ -523,7 +534,7 @@ class SpotApiTests {
 				.andExpect(status().isNoContent());
 
 		// Fotos verschwinden mit dem Spot
-		mvc.perform(multipart("/api/spots/" + spotId + "/photos").with(httpBasic(other, PASSWORD))
+		mvc.perform(multipart("/api/spots/" + spotId + "/photos").with(httpBasic(owner, PASSWORD))
 						.file(new MockMultipartFile("file", "bild.png", "image/png", png)))
 				.andExpect(status().isCreated());
 		mvc.perform(delete("/api/spots/" + spotId).with(httpBasic(owner, PASSWORD)))
@@ -689,10 +700,15 @@ class SpotApiTests {
 		String alt = token(username);
 		String zweitesGeraet = token(username);
 
-		mvc.perform(put("/api/users/me/password").header("Authorization", "Bearer " + alt)
+		String pwJson = mvc.perform(put("/api/users/me/password").header("Authorization", "Bearer " + alt)
 						.contentType(MediaType.APPLICATION_JSON)
 						.content("{\"currentPassword\":\"" + PASSWORD + "\",\"newPassword\":\"neuesPasswort1\"}"))
-				.andExpect(status().isNoContent());
+				.andExpect(status().isOk())
+				.andReturn().getResponse().getContentAsString();
+		// das aktuelle Gerät bekommt ein neues, gültiges Token
+		String nachAenderung = JsonPath.read(pwJson, "$.token");
+		mvc.perform(get("/api/users/me").header("Authorization", "Bearer " + nachAenderung))
+				.andExpect(status().isOk());
 		mvc.perform(get("/api/users/me").header("Authorization", "Bearer " + alt))
 				.andExpect(status().isUnauthorized());
 		mvc.perform(get("/api/users/me").header("Authorization", "Bearer " + zweitesGeraet))
@@ -841,6 +857,53 @@ class SpotApiTests {
 				.andExpect(jsonPath("$.kommentare[0].text").value("Mein Text"))
 				.andExpect(jsonPath("$.fotos").isEmpty())
 				.andExpect(jsonPath("$.meldungen").isEmpty());
+	}
+
+	@Test
+	void benutzernamenSindEingeschraenkt() throws Exception {
+		for (String bad : new String[] {"Wurst/Hans", "a%b", "semi;colon", "back\\\\slash", " -abc", "zwei\\nzeilen"}) {
+			mvc.perform(post("/api/auth/register").contentType(MediaType.APPLICATION_JSON)
+							.content("{\"email\":\"%s@test.de\",\"password\":\"%s\",\"displayName\":\"%s\"}"
+									.formatted(newName(), PASSWORD, bad)))
+					.andExpect(status().isBadRequest());
+		}
+		for (String reserved : new String[] {"Admin", "Sausage-Team", "moderator"}) {
+			mvc.perform(post("/api/auth/register").contentType(MediaType.APPLICATION_JSON)
+							.content("{\"email\":\"%s@test.de\",\"password\":\"%s\",\"displayName\":\"%s\"}"
+									.formatted(newName(), PASSWORD, reserved)))
+					.andExpect(status().isConflict());
+		}
+		// Erlaubt: Umlaute, Leerzeichen, Punkt, Unterstrich, Bindestrich; Vollbreite-Zeichen werden vereinheitlicht
+		String suffix = newName().substring(1);
+		mvc.perform(post("/api/auth/register").contentType(MediaType.APPLICATION_JSON)
+						.content("{\"email\":\"%s@test.de\",\"password\":\"%s\",\"displayName\":\"Jörg Würst_%s.x-y\"}"
+								.formatted(newName(), PASSWORD, suffix)))
+				.andExpect(status().isCreated());
+		String json = mvc.perform(post("/api/auth/register").contentType(MediaType.APPLICATION_JSON)
+						.content("{\"email\":\"%s@test.de\",\"password\":\"%s\",\"displayName\":\"ＭＡＸ%s\"}"
+								.formatted(newName(), PASSWORD, suffix)))
+				.andExpect(status().isCreated())
+				.andReturn().getResponse().getContentAsString();
+		String token = JsonPath.read(json, "$.token");
+		mvc.perform(get("/api/users/me").header("Authorization", "Bearer " + token))
+				.andExpect(jsonPath("$.username").value("MAX" + suffix));
+	}
+
+	@Test
+	void pixelbombeWirdAbgelehnt() throws Exception {
+		String owner = newName();
+		register(owner);
+		long spotId = createSpot(owner, "Pixel " + owner);
+		BufferedImage tiny = new BufferedImage(2, 2, BufferedImage.TYPE_INT_RGB);
+		ByteArrayOutputStream out = new ByteArrayOutputStream();
+		ImageIO.write(tiny, "png", out);
+		byte[] png = out.toByteArray();
+		// Kopfdaten auf 30.000 × 30.000 Pixel setzen (900 Megapixel)
+		java.nio.ByteBuffer.wrap(png).putInt(16, 30_000).putInt(20, 30_000);
+		mvc.perform(multipart("/api/spots/" + spotId + "/photos").with(httpBasic(owner, PASSWORD))
+						.file(new MockMultipartFile("file", "bombe.png", "image/png", png)))
+				.andExpect(status().isBadRequest())
+				.andExpect(jsonPath("$.detail").value(org.hamcrest.Matchers.containsString("zu groß")));
 	}
 
 	private String token(String username) throws Exception {

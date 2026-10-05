@@ -28,12 +28,6 @@ import java.util.Optional;
 @RequestMapping("/api/auth")
 class TokenController {
 
-	public record TokenResponse(String token, String accessToken, String tokenType, long expiresIn) {
-
-		static TokenResponse of(TokenService.IssuedToken issued) {
-			return new TokenResponse(issued.token(), issued.token(), "Bearer", issued.expiresIn());
-		}
-	}
 
 	/** {@code email} darf auch der Benutzername sein. */
 	public record LoginRequest(@NotBlank String email, @NotBlank String password) {
@@ -63,8 +57,8 @@ class TokenController {
 
 	/** Tauscht HTTP-Basic-Login (oder ein noch gültiges Token) gegen ein neues JWT. */
 	@PostMapping("/token")
-	TokenResponse token(Authentication auth) {
-		return TokenResponse.of(tokens.issue(currentUser(auth)));
+	TokenService.TokenResponse token(Authentication auth) {
+		return TokenService.TokenResponse.of(tokens.issue(currentUser(auth)));
 	}
 
 	/** Meldet auf allen Geräten ab: Alle bisher ausgestellten Tokens werden ungültig. */
@@ -81,7 +75,7 @@ class TokenController {
 
 	/** Anmeldung mit E-Mail (oder Benutzername) und Passwort im JSON-Body. */
 	@PostMapping("/login")
-	TokenResponse login(@Valid @RequestBody LoginRequest request, HttpServletRequest http) {
+	TokenService.TokenResponse login(@Valid @RequestBody LoginRequest request, HttpServletRequest http) {
 		String login = request.email().trim();
 		throttle.checkLogin(http.getRemoteAddr(), login);
 		Optional<UserRepository.StoredUser> user = users.findByLogin(login);
@@ -91,18 +85,21 @@ class TokenController {
 			throttle.loginFailed(http.getRemoteAddr(), login);
 			throw new ResponseStatusException(HttpStatus.UNAUTHORIZED, "E-Mail oder Passwort ist falsch");
 		}
-		return TokenResponse.of(tokens.issue(user.get()));
+		return TokenService.TokenResponse.of(tokens.issue(user.get()));
 	}
 
 	/** Registriert einen Account (Anzeigename = Benutzername) und meldet direkt an. */
 	@PostMapping("/register")
-	ResponseEntity<TokenResponse> register(@Valid @RequestBody RegisterRequest request, HttpServletRequest http) {
+	ResponseEntity<TokenService.TokenResponse> register(@Valid @RequestBody RegisterRequest request, HttpServletRequest http) {
 		throttle.checkRegistration(http.getRemoteAddr());
-		String username = request.displayName().trim();
+		String username = UserRepository.normalizeUsername(request.displayName());
+		if (UserRepository.isReservedUsername(username)) {
+			throw new ResponseStatusException(HttpStatus.CONFLICT, "Dieser Anzeigename ist reserviert");
+		}
 		try {
 			long id = users.create(username, request.email().trim(), passwordEncoder.encode(request.password()));
 			UserRepository.StoredUser user = users.findByUsername(username).orElseThrow();
-			return ResponseEntity.created(URI.create("/api/users/" + id)).body(TokenResponse.of(tokens.issue(user)));
+			return ResponseEntity.created(URI.create("/api/users/" + id)).body(TokenService.TokenResponse.of(tokens.issue(user)));
 		}
 		catch (DuplicateKeyException ex) {
 			throw new ResponseStatusException(HttpStatus.CONFLICT, "Anzeigename oder E-Mail ist bereits vergeben");

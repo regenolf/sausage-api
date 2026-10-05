@@ -6,6 +6,7 @@ import org.springframework.http.HttpStatus;
 import org.springframework.stereotype.Component;
 import org.springframework.web.server.ResponseStatusException;
 
+import java.net.InetAddress;
 import java.time.Clock;
 import java.time.Duration;
 import java.util.Locale;
@@ -61,6 +62,7 @@ public class LoginThrottle {
 
 	/** Wirft 429, wenn für diese IP und diesen Account zu viele Fehlversuche vorliegen. */
 	public void checkLogin(String ip, String login) {
+		ip = clientKey(ip);
 		if (!enabled) {
 			return;
 		}
@@ -74,6 +76,7 @@ public class LoginThrottle {
 	}
 
 	public void loginFailed(String ip, String login) {
+		ip = clientKey(ip);
 		if (enabled) {
 			failedPerAccount.record(accountKey(ip, login));
 			failedPerIp.record(ip);
@@ -82,6 +85,7 @@ public class LoginThrottle {
 
 	/** Zählt eine Registrierung und wirft 429, wenn diese IP zu viele angelegt hat. */
 	public void checkRegistration(String ip) {
+		ip = clientKey(ip);
 		if (enabled && !registrations.tryAcquire(ip)) {
 			throw new TooManyRequestsException("Zu viele Registrierungen. Bitte später erneut versuchen.",
 					registrations.secondsUntilReset(ip));
@@ -90,6 +94,7 @@ public class LoginThrottle {
 
 	/** Zählt eine Meldung und wirft 429, wenn diese IP zu viele abgegeben hat. */
 	public void checkReport(String ip) {
+		ip = clientKey(ip);
 		if (enabled && !reports.tryAcquire(ip)) {
 			throw new TooManyRequestsException("Zu viele Meldungen. Bitte später erneut versuchen.",
 					reports.secondsUntilReset(ip));
@@ -105,6 +110,30 @@ public class LoginThrottle {
 	}
 
 	private static final String MESSAGE = "Zu viele fehlgeschlagene Anmeldeversuche. Bitte später erneut versuchen.";
+
+	/**
+	 * IPv6-Adressen werden auf ihr /64-Präfix reduziert: Ein Anschluss bekommt meist ein ganzes /64 und könnte sonst
+	 * durch Adresswechsel jede Begrenzung umgehen. IPv4 bleibt unverändert.
+	 */
+	static String clientKey(String ip) {
+		if (ip == null || ip.indexOf(':') < 0) {
+			return ip;
+		}
+		try {
+			byte[] bytes = InetAddress.ofLiteral(ip).getAddress();
+			if (bytes.length != 16) {
+				return ip;
+			}
+			StringBuilder prefix = new StringBuilder();
+			for (int i = 0; i < 8; i += 2) {
+				prefix.append(Integer.toHexString(((bytes[i] & 0xFF) << 8) | (bytes[i + 1] & 0xFF))).append(':');
+			}
+			return prefix.append(":/64").toString();
+		}
+		catch (IllegalArgumentException ex) {
+			return ip;
+		}
+	}
 
 	private static String accountKey(String ip, String login) {
 		return ip + "|" + (login == null ? "" : login.trim().toLowerCase(Locale.ROOT));

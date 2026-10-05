@@ -15,10 +15,27 @@ public class UserRepository {
 	public record UserProfile(long id, String username, String email, String role, Instant createdAt) {
 	}
 
-	/** Benutzernamen dürfen kein "@" (sonst Verwechslung mit E-Mail beim Login) und kein ":" (Basic Auth) enthalten. */
-	public static final String USERNAME_PATTERN = "[^@:]+";
+	/**
+	 * Erlaubt sind Buchstaben, Ziffern, Leerzeichen, Punkt, Unterstrich und Bindestrich; Anfang und Ende müssen
+	 * Buchstabe oder Ziffer sein. Damit ist der Name kein E-Mail-Login ("@"), bricht Basic Auth nicht (":") und ist
+	 * als Pfadsegment (z. B. Admin-Sperre) nutzbar.
+	 */
+	public static final String USERNAME_PATTERN = "[\\p{L}\\p{N}](?:[\\p{L}\\p{N} ._-]*[\\p{L}\\p{N}])?";
 
-	public static final String USERNAME_MESSAGE = "darf weder @ noch : enthalten";
+	public static final String USERNAME_MESSAGE = "nur Buchstaben, Ziffern, Leerzeichen, Punkt, Unterstrich und Bindestrich";
+
+	private static final java.util.Set<String> RESERVED_USERNAMES = java.util.Set.of("admin", "administrator",
+			"moderator", "moderation", "support", "sausage", "sausageteam", "team", "system", "root");
+
+	/** Vereinheitlicht einen Benutzernamen (Unicode NFKC, Leerzeichen am Rand entfernt). */
+	public static String normalizeUsername(String username) {
+		return java.text.Normalizer.normalize(username.trim(), java.text.Normalizer.Form.NFKC);
+	}
+
+	/** Namen, die nach Betreiber oder Moderation aussehen (Groß-/Kleinschreibung und Trennzeichen egal). */
+	public static boolean isReservedUsername(String username) {
+		return RESERVED_USERNAMES.contains(username.toLowerCase(java.util.Locale.ROOT).replaceAll("[ ._-]", ""));
+	}
 
 	private final JdbcClient jdbc;
 

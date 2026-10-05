@@ -134,7 +134,13 @@ class SpotController {
 			requireSpot(id);
 		}
 		else {
-			requireSpotOwner(id, currentUserId(auth));
+			long userId = currentUserId(auth);
+			requireSpotOwner(id, userId);
+			// Beiträge anderer (Bewertungen, Kommentare, Fotos) darf der Ersteller nicht mitlöschen
+			if (repository.hasForeignContent(id, userId)) {
+				throw new ResponseStatusException(HttpStatus.CONFLICT,
+						"Die Bude hat Beiträge anderer Nutzer und kann nur noch von der Moderation gelöscht werden. Bitte über „Melden“ anfragen.");
+			}
 		}
 		repository.deleteSpot(id);
 		return ResponseEntity.noContent().build();

@@ -87,7 +87,7 @@ sofort ungültig, ebenso ein gesperrter oder gelöschter Account. Rollenänderun
 | Methode | Pfad | Beschreibung |
 |---|---|---|
 | `POST` | `/api/users` | Registrieren (öffentlich) |
-| `POST` | `/api/auth/register` | Registrieren und direkt anmelden (`email`, `password`, `displayName` 3–50 Zeichen ohne `@` und `:`) → Token |
+| `POST` | `/api/auth/register` | Registrieren und direkt anmelden (`email`, `password`, `displayName` 3–50 Zeichen: Buchstaben, Ziffern, Leerzeichen, `.`, `_`, `-`; reservierte Namen wie „Admin“ sind gesperrt) → Token |
 | `POST` | `/api/auth/login` | Anmelden (`email` oder Benutzername, `password`) → Token |
 | `POST` | `/api/auth/token` | JWT holen bzw. verlängern (mit Basic Auth oder gültigem Token) 🔒 |
 | `POST` | `/api/auth/logout-all` | Auf allen Geräten abmelden (alle Tokens ungültig) 🔒 |
@@ -95,7 +95,7 @@ sofort ungültig, ebenso ein gesperrter oder gelöschter Account. Rollenänderun
 | `GET` | `/api/users/me/spots` | Eigene Spots, neueste zuerst 🔒 |
 | `GET` | `/api/users/me/export` | Alle eigenen Daten als JSON-Datei (Auskunft/Datenübertragbarkeit, Art. 15/20 DSGVO) 🔒 |
 | `DELETE` | `/api/users/me` | Account löschen (Body `{"password":…}`): Bewertungen, Kommentare, Fotos werden gelöscht, eigene Spots anonymisiert 🔒 |
-| `PUT` | `/api/users/me/password` | Passwort ändern (`currentPassword`, `newPassword`), meldet alle Geräte ab 🔒 |
+| `PUT` | `/api/users/me/password` | Passwort ändern (`currentPassword`, `newPassword`); meldet alle anderen Geräte ab und liefert ein neues Token 🔒 |
 | `GET` | `/api/categories` | Alle Kategorien |
 | `POST` | `/api/categories` | Kategorie anlegen 🔒 (nur Admin) |
 | `GET` | `/api/spots?category=&q=&page=&size=` | Spots als Liste, Suche in Name/Stadt; mit `size` seitenweise, Gesamtzahl im Header `X-Total-Count` |
@@ -103,7 +103,7 @@ sofort ungültig, ebenso ein gesperrter oder gelöschter Account. Rollenänderun
 | `GET` | `/api/spots/{id}` | Spot-Details inkl. Durchschnittsbewertung, Ersteller und `photos` |
 | `POST` | `/api/spots` | Spot anlegen 🔒 |
 | `PUT` | `/api/spots/{id}` | Spot bearbeiten 🔒 (nur Ersteller) |
-| `DELETE` | `/api/spots/{id}` | Spot inkl. Bewertungen/Kommentaren löschen 🔒 (Ersteller oder Admin) |
+| `DELETE` | `/api/spots/{id}` | Spot inkl. Bewertungen/Kommentaren/Fotos löschen 🔒 (Admin; Ersteller nur, solange keine Beiträge anderer existieren, sonst 409) |
 | `GET` | `/api/spots/{id}/ratings` | Bewertungen (`score`, `comment`, `author`, `authorName`), neueste zuerst |
 | `POST` | `/api/spots/{id}/ratings` | Bewerten (`score` 1–5, optional `comment`), erneutes Bewerten überschreibt → Spot 🔒 |
 | `PUT` | `/api/spots/{id}/ratings/{ratingId}` | Eigene Bewertung ändern → Spot 🔒 |
@@ -112,7 +112,7 @@ sofort ungültig, ebenso ein gesperrter oder gelöschter Account. Rollenänderun
 | `DELETE` | `/api/spots/{id}/ratings/me` | Eigene Bewertung zurücknehmen 🔒 |
 | `GET` | `/api/spots/{id}/photos` | Fotos eines Spots (Metadaten mit `url`) |
 | `GET` | `/api/spots/{id}/photos/{photoId}` | Das Bild selbst |
-| `POST` | `/api/spots/{id}/photos` | Foto hochladen (multipart, Feld `file`, JPEG/PNG/WebP, max. 10 MB, max. 20 je Spot; EXIF/GPS-Metadaten werden entfernt) 🔒 |
+| `POST` | `/api/spots/{id}/photos` | Foto hochladen (multipart, Feld `file`, JPEG/PNG/WebP, max. 10 MB, 40 Megapixel und 20 je Spot; EXIF/GPS-Metadaten werden entfernt) 🔒 |
 | `DELETE` | `/api/spots/{id}/photos/{photoId}` | Foto löschen 🔒 (Hochladender, Ersteller des Spots oder Admin) |
 | `GET` | `/api/spots/{id}/comments` | Kommentare (neueste zuerst, mit Benutzername) |
 | `POST` | `/api/spots/{id}/comments` | Kommentieren 🔒 |

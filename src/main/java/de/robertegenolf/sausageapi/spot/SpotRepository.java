@@ -235,6 +235,19 @@ class SpotRepository {
 				.update();
 	}
 
+	/** True, wenn andere als der Ersteller Bewertungen, Kommentare oder Fotos zu diesem Spot beigetragen haben. */
+	boolean hasForeignContent(long spotId, long ownerId) {
+		return jdbc.sql("""
+				SELECT EXISTS (SELECT 1 FROM rating WHERE spot_id = :spotId AND user_id <> :ownerId)
+				    OR EXISTS (SELECT 1 FROM comment WHERE spot_id = :spotId AND user_id <> :ownerId)
+				    OR EXISTS (SELECT 1 FROM spot_photo WHERE spot_id = :spotId AND user_id <> :ownerId)
+				""")
+				.param("spotId", spotId)
+				.param("ownerId", ownerId)
+				.query(Boolean.class)
+				.single();
+	}
+
 	void deleteSpot(long id) {
 		jdbc.sql("DELETE FROM spot WHERE id = :id")
 				.param("id", id)

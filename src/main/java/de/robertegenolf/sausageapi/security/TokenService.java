@@ -18,9 +18,22 @@ import java.util.List;
  * Clients, maßgeblich ist die Datenbank), {@code ver} die Token-Version des Users.
  */
 @Service
-class TokenService {
+public class TokenService {
 
 	record IssuedToken(String token, long expiresIn) {
+	}
+
+	/** Antwort mit neuem JWT; {@code token} und {@code accessToken} sind identisch (für verschiedene Clients). */
+	public record TokenResponse(String token, String accessToken, String tokenType, long expiresIn) {
+
+		static TokenResponse of(IssuedToken issued) {
+			return new TokenResponse(issued.token(), issued.token(), "Bearer", issued.expiresIn());
+		}
+	}
+
+	/** Stellt ein Token für den (aktuellen Stand des) Users aus. */
+	public TokenResponse issueResponse(UserRepository.StoredUser user) {
+		return TokenResponse.of(issue(user));
 	}
 
 	private final JwtEncoder encoder;

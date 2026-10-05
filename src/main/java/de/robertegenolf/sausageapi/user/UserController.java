@@ -1,6 +1,7 @@
 package de.robertegenolf.sausageapi.user;
 
 import de.robertegenolf.sausageapi.security.LoginThrottle;
+import de.robertegenolf.sausageapi.security.TokenService;
 import jakarta.servlet.http.HttpServletRequest;
 import jakarta.validation.Valid;
 import jakarta.validation.constraints.Email;
@@ -53,23 +54,27 @@ class UserController {
 	private final UserExportRepository exports;
 	private final PasswordEncoder passwordEncoder;
 	private final LoginThrottle throttle;
+	private final TokenService tokens;
 
 	UserController(UserRepository repository, UserExportRepository exports, PasswordEncoder passwordEncoder,
-			LoginThrottle throttle) {
+			LoginThrottle throttle, TokenService tokens) {
 		this.repository = repository;
 		this.exports = exports;
 		this.passwordEncoder = passwordEncoder;
 		this.throttle = throttle;
+		this.tokens = tokens;
 	}
 
 	@PostMapping
 	ResponseEntity<RegisteredUser> register(@Valid @RequestBody RegisterRequest request, HttpServletRequest http) {
 		throttle.checkRegistration(http.getRemoteAddr());
+		String username = UserRepository.normalizeUsername(request.username());
+		if (UserRepository.isReservedUsername(username)) {
+			throw new ResponseStatusException(HttpStatus.CONFLICT, "Dieser Benutzername ist reserviert");
+		}
 		try {
-			long id = repository.create(request.username(), request.email(),
-					passwordEncoder.encode(request.password()));
-			return ResponseEntity.created(URI.create("/api/users/" + id))
-					.body(new RegisteredUser(id, request.username()));
+			long id = repository.create(username, request.email().trim(), passwordEncoder.encode(request.password()));
+			return ResponseEntity.created(URI.create("/api/users/" + id)).body(new RegisteredUser(id, username));
 		}
 		catch (DuplicateKeyException ex) {
 			throw new ResponseStatusException(HttpStatus.CONFLICT, "Benutzername oder E-Mail ist bereits vergeben");
@@ -83,14 +88,18 @@ class UserController {
 	}
 
 	@PutMapping("/me/password")
-	ResponseEntity<Void> changePassword(@Valid @RequestBody ChangePasswordRequest request, Authentication auth) {
+	/**
+	 * Ändert das Passwort. Alle bisherigen Tokens (auch auf anderen Geräten) werden ungültig; die Antwort enthält ein
+	 * neues Token, damit das aktuelle Gerät angemeldet bleibt.
+	 */
+	TokenService.TokenResponse changePassword(@Valid @RequestBody ChangePasswordRequest request, Authentication auth) {
 		UserRepository.StoredUser user = repository.findByUsername(auth.getName())
 				.orElseThrow(() -> new ResponseStatusException(HttpStatus.UNAUTHORIZED));
 		if (!passwordEncoder.matches(request.currentPassword(), user.passwordHash())) {
 			throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "Aktuelles Passwort ist falsch");
 		}
 		repository.updatePasswordHash(user.id(), passwordEncoder.encode(request.newPassword()));
-		return ResponseEntity.noContent().build();
+		return tokens.issueResponse(repository.findByUsername(user.username()).orElseThrow());
 	}
 
 	/**

@@ -19,11 +19,19 @@ final class FixedWindowRateLimiter {
 	private final Duration window;
 	private final Clock clock;
 	private final Map<String, Window> windows = new ConcurrentHashMap<>();
+	private final int maxKeys;
+	private volatile Instant lastCleanup = Instant.EPOCH;
 
 	FixedWindowRateLimiter(int limit, Duration window, Clock clock) {
+		this(limit, window, clock, 100_000);
+	}
+
+	/** {@code maxKeys} begrenzt den Speicher auch dann, wenn ein Angreifer sehr viele Schlüssel erzeugt. */
+	FixedWindowRateLimiter(int limit, Duration window, Clock clock, int maxKeys) {
 		this.limit = limit;
 		this.window = window;
 		this.clock = clock;
+		this.maxKeys = maxKeys;
 	}
 
 	/** Zählt einen Versuch und liefert true, solange das Limit nicht überschritten ist. */
@@ -37,6 +45,10 @@ final class FixedWindowRateLimiter {
 	}
 
 	/** True, wenn das Limit im aktuellen Fenster bereits erreicht ist. */
+	int size() {
+		return windows.size();
+	}
+
 	boolean isBlocked(String key) {
 		Window w = windows.get(key);
 		return w != null && !expired(w, clock.instant()) && w.count() >= limit;
@@ -53,8 +65,14 @@ final class FixedWindowRateLimiter {
 
 	private Window increment(String key) {
 		Instant now = clock.instant();
-		if (windows.size() > 10_000) {
+		// Abgelaufene Fenster höchstens einmal pro Sekunde entfernen (kein voller Scan bei jedem Aufruf)
+		if (windows.size() > maxKeys / 10 && now.isAfter(lastCleanup.plusSeconds(1))) {
+			lastCleanup = now;
 			windows.values().removeIf(w -> expired(w, now));
+		}
+		// Notbremse gegen Speicherüberlauf: lieber kurz alle Zähler vergessen als den Server lahmlegen
+		if (windows.size() >= maxKeys) {
+			windows.clear();
 		}
 		return windows.compute(key, (k, w) -> w == null || expired(w, now)
 				? new Window(now, 1)

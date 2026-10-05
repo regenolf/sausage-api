@@ -74,6 +74,7 @@ class PhotoController {
 		}
 		byte[] data;
 		try {
+			ImageMetadataStripper.checkDimensions(upload, contentType);
 			// GPS-Position und andere Metadaten nicht veröffentlichen
 			data = ImageMetadataStripper.strip(upload, contentType);
 		}
