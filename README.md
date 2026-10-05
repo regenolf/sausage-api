@@ -29,7 +29,7 @@ docker compose --profile app up --build   # API auf http://localhost:8080
 | `DB_URL` | `jdbc:postgresql://localhost:5432/sausage` |
 | `DB_USERNAME` / `DB_PASSWORD` | `sausage` / `sausage` |
 | `JWT_SECRET` | Entwicklungs-Schlüssel – **in Produktion setzen** (mind. 32 Zeichen) |
-| `JWT_VALIDITY` | `PT1H` |
+| `JWT_VALIDITY` | `P30D` |
 | `app.rate-limit.registrations-per-hour` | `10` Registrierungen pro IP und Stunde |
 | `app.rate-limit.failed-logins-per-15-minutes` | `10` Fehlversuche pro IP, danach 429 bis zum Fensterende |
 | `CORS_ALLOWED_ORIGINS` | `http://localhost:8100,http://localhost:4200,capacitor://localhost,https://localhost,http://localhost:3000,http://localhost:5173` |
@@ -54,19 +54,21 @@ curl -X POST http://localhost:8080/api/auth/login -H 'Content-Type: application/
 curl -H "Authorization: Bearer eyJ..." http://localhost:8080/api/users/me
 ```
 
-Tokens sind `app.jwt.validity` lang gültig (Standard 1 Stunde) und bleiben das auch nach einer
-Passwortänderung bis zum Ablauf.
+Tokens sind `app.jwt.validity` lang gültig (Standard 30 Tage). Die API prüft bei jeder Anfrage gegen die
+Datenbank, ob das Token noch gilt: Eine Passwortänderung oder `POST /api/auth/logout-all` macht alle alten Tokens
+sofort ungültig, ebenso ein gesperrter oder gelöschter Account. Rollenänderungen wirken sofort.
 
 | Methode | Pfad | Beschreibung |
 |---|---|---|
 | `POST` | `/api/users` | Registrieren (öffentlich) |
 | `POST` | `/api/auth/register` | Registrieren und direkt anmelden (`email`, `password`, `displayName`) → Token |
 | `POST` | `/api/auth/login` | Anmelden (`email` oder Benutzername, `password`) → Token |
-| `POST` | `/api/auth/token` | JWT holen (mit Basic Auth oder gültigem Token) 🔒 |
+| `POST` | `/api/auth/token` | JWT holen bzw. verlängern (mit Basic Auth oder gültigem Token) 🔒 |
+| `POST` | `/api/auth/logout-all` | Auf allen Geräten abmelden (alle Tokens ungültig) 🔒 |
 | `GET` | `/api/users/me` | Eigenes Profil 🔒 |
 | `GET` | `/api/users/me/spots` | Eigene Spots, neueste zuerst 🔒 |
 | `DELETE` | `/api/users/me` | Account löschen (Body `{"password":…}`): Bewertungen, Kommentare, Fotos werden gelöscht, eigene Spots anonymisiert 🔒 |
-| `PUT` | `/api/users/me/password` | Passwort ändern (`currentPassword`, `newPassword`) 🔒 |
+| `PUT` | `/api/users/me/password` | Passwort ändern (`currentPassword`, `newPassword`), meldet alle Geräte ab 🔒 |
 | `GET` | `/api/categories` | Alle Kategorien |
 | `POST` | `/api/categories` | Kategorie anlegen 🔒 (nur Admin) |
 | `GET` | `/api/spots?category=&q=&page=&size=` | Spots als Liste, Suche in Name/Stadt; mit `size` seitenweise, Gesamtzahl im Header `X-Total-Count` |

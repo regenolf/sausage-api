@@ -654,11 +654,68 @@ class SpotApiTests {
 				.andExpect(status().isNotFound());
 	}
 
+	@Test
+	void tokensWerdenBeiPasswortaenderungUndAbmeldungUngueltig() throws Exception {
+		String username = newName();
+		register(username);
+		String alt = token(username);
+		String zweitesGeraet = token(username);
+
+		mvc.perform(put("/api/users/me/password").header("Authorization", "Bearer " + alt)
+						.contentType(MediaType.APPLICATION_JSON)
+						.content("{\"currentPassword\":\"" + PASSWORD + "\",\"newPassword\":\"neuesPasswort1\"}"))
+				.andExpect(status().isNoContent());
+		mvc.perform(get("/api/users/me").header("Authorization", "Bearer " + alt))
+				.andExpect(status().isUnauthorized());
+		mvc.perform(get("/api/users/me").header("Authorization", "Bearer " + zweitesGeraet))
+				.andExpect(status().isUnauthorized());
+
+		String json = mvc.perform(post("/api/auth/login").contentType(MediaType.APPLICATION_JSON)
+						.content("{\"email\":\"" + username + "\",\"password\":\"neuesPasswort1\"}"))
+				.andExpect(status().isOk())
+				.andReturn().getResponse().getContentAsString();
+		String neu = JsonPath.read(json, "$.token");
+		mvc.perform(get("/api/users/me").header("Authorization", "Bearer " + neu))
+				.andExpect(status().isOk());
+
+		// Überall abmelden
+		mvc.perform(post("/api/auth/logout-all").header("Authorization", "Bearer " + neu))
+				.andExpect(status().isNoContent());
+		mvc.perform(get("/api/users/me").header("Authorization", "Bearer " + neu))
+				.andExpect(status().isUnauthorized());
+	}
+
+	@Test
+	void rollenaenderungWirktSofortAuchMitBestehendemToken() throws Exception {
+		String username = newName();
+		register(username);
+		String jwt = token(username);
+		String code = "ROLLE_" + username.toUpperCase();
+		String category = "{\"code\":\"" + code + "\",\"name\":\"Rollentest\"}";
+
+		mvc.perform(post("/api/categories").header("Authorization", "Bearer " + jwt)
+						.contentType(MediaType.APPLICATION_JSON).content(category))
+				.andExpect(status().isForbidden());
+		jdbc.sql("UPDATE app_user SET role = 'ADMIN' WHERE username = :u").param("u", username).update();
+		mvc.perform(post("/api/categories").header("Authorization", "Bearer " + jwt)
+						.contentType(MediaType.APPLICATION_JSON).content(category))
+				.andExpect(status().isCreated());
+		jdbc.sql("UPDATE app_user SET role = 'USER' WHERE username = :u").param("u", username).update();
+		mvc.perform(post("/api/categories").header("Authorization", "Bearer " + jwt)
+						.contentType(MediaType.APPLICATION_JSON).content(category.replace(code, code + "_2")))
+				.andExpect(status().isForbidden());
+
+		// gesperrter Account: Token sofort ungültig
+		jdbc.sql("UPDATE app_user SET enabled = false WHERE username = :u").param("u", username).update();
+		mvc.perform(get("/api/users/me").header("Authorization", "Bearer " + jwt))
+				.andExpect(status().isUnauthorized());
+	}
+
 	private String token(String username) throws Exception {
 		String json = mvc.perform(post("/api/auth/token").with(httpBasic(username, PASSWORD)))
 				.andExpect(status().isOk())
 				.andExpect(jsonPath("$.tokenType").value("Bearer"))
-				.andExpect(jsonPath("$.expiresIn").value(3600))
+				.andExpect(jsonPath("$.expiresIn").value(30 * 24 * 3600))
 				.andReturn().getResponse().getContentAsString();
 		return JsonPath.read(json, "$.accessToken");
 	}

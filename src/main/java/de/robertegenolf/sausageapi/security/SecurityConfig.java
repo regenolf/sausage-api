@@ -26,7 +26,8 @@ import java.util.List;
 class SecurityConfig {
 
 	@Bean
-	SecurityFilterChain securityFilterChain(HttpSecurity http) throws Exception {
+	SecurityFilterChain securityFilterChain(HttpSecurity http, UserJwtAuthenticationConverter jwtConverter)
+			throws Exception {
 		http
 				.csrf(csrf -> csrf.disable())
 				.cors(Customizer.withDefaults())
@@ -41,7 +42,7 @@ class SecurityConfig {
 						.anyRequest().authenticated())
 				.httpBasic(basic -> {
 				})
-				.oauth2ResourceServer(oauth -> oauth.jwt(Customizer.withDefaults()));
+				.oauth2ResourceServer(oauth -> oauth.jwt(jwt -> jwt.jwtAuthenticationConverter(jwtConverter)));
 		return http.build();
 	}
 
