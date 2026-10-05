@@ -1,8 +1,10 @@
 package de.robertegenolf.sausageapi.spot;
 
+import de.robertegenolf.sausageapi.TestcontainersConfiguration;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
+import org.springframework.context.annotation.Import;
 import org.springframework.boot.webmvc.test.autoconfigure.AutoConfigureMockMvc;
 import org.springframework.http.MediaType;
 import org.springframework.jdbc.core.simple.JdbcClient;
@@ -21,10 +23,11 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 import static org.springframework.security.test.web.servlet.request.SecurityMockMvcRequestPostProcessors.httpBasic;
 
 /**
- * Läuft gegen die lokale Postgres-DB (docker compose up). Jeder Lauf legt eigene
- * Test-User mit zufälligem Namen an, damit Wiederholungen sich nicht stören.
+ * Läuft gegen eine Postgres-Instanz aus Testcontainers (Docker nötig). Jeder Test legt eigene
+ * Test-User mit zufälligem Namen an, damit sich die Tests nicht gegenseitig stören.
  */
 @SpringBootTest
+@Import(TestcontainersConfiguration.class)
 @AutoConfigureMockMvc
 class SpotApiTests {
 

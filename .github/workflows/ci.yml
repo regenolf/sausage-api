@@ -8,20 +8,6 @@ on:
 jobs:
   test:
     runs-on: ubuntu-latest
-    services:
-      postgres:
-        image: postgres:17
-        env:
-          POSTGRES_DB: sausage
-          POSTGRES_USER: sausage
-          POSTGRES_PASSWORD: sausage
-        ports:
-          - 5432:5432
-        options: >-
-          --health-cmd "pg_isready -U sausage -d sausage"
-          --health-interval 5s
-          --health-timeout 3s
-          --health-retries 10
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-java@v4
@@ -29,5 +15,6 @@ jobs:
           distribution: temurin
           java-version: '25'
           cache: maven
+      # Die Tests starten Postgres selbst über Testcontainers (Docker ist auf dem Runner vorhanden)
       - name: Build und Tests
         run: ./mvnw -B verify

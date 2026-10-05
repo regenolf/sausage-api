@@ -8,7 +8,13 @@ docker compose up -d   # Postgres auf localhost:5432
 ./mvnw spring-boot:run # Liquibase legt das Schema beim Start an
 ```
 
-Die Tests (`./mvnw test`) laufen ebenfalls gegen diese lokale Datenbank.
+Ohne docker compose, mit einer Wegwerf-Datenbank aus Docker (Testcontainers):
+
+```bash
+./mvnw spring-boot:test-run
+```
+
+Die Tests (`./mvnw test`) starten ihre eigene Postgres über Testcontainers – es muss nur Docker laufen.
 
 API und Datenbank komplett im Container:
 
@@ -27,7 +33,7 @@ docker compose --profile app up --build   # API auf http://localhost:8080
 API-Doku (Swagger UI): http://localhost:8080/swagger-ui.html
 
 Health-Checks: `/actuator/health`, `/actuator/health/liveness`, `/actuator/health/readiness`.
-Die GitHub-Actions-CI (`.github/workflows/ci.yml`) startet Postgres als Service und führt `./mvnw verify` aus.
+Die GitHub-Actions-CI (`.github/workflows/ci.yml`) führt `./mvnw verify` aus.
 
 ## API
 
