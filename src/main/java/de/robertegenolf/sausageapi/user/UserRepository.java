@@ -165,6 +165,11 @@ public class UserRepository {
 				.list();
 	}
 
+	/** E-Mail eines Kontos, z. B. für Benachrichtigungen der Moderation (auch gesperrte Konten). */
+	public Optional<String> findEmailById(long id) {
+		return jdbc.sql("SELECT email FROM app_user WHERE id = :id").param("id", id).query(String.class).optional();
+	}
+
 	void delete(long id) {
 		jdbc.sql("DELETE FROM app_user WHERE id = :id")
 				.param("id", id)

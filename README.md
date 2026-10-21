@@ -159,7 +159,13 @@ Absolute Adressen kommen aus `PUBLIC_URL` oder aus `X-Forwarded-Proto`/`Host`.
 | `PUT` | `/api/admin/users/{username}/status` | Account sperren/entsperren `{"enabled":false}`; Tokens werden sofort ungültig 🔒 Admin |
 
 Admins dürfen außerdem fremde Spots bearbeiten und löschen sowie Bewertungen, Kommentare und Fotos löschen.
-Noch offen: Benachrichtigung von Meldern und Betroffenen per E-Mail (braucht Mailversand).
+| `GET` | `/api/users/me/moderation-decisions` | Entfernte eigene Inhalte mit Grund, Begründung und gesichertem Auszug (DSA Art. 17) 🔒 |
+
+Beim Melden werden Verfasser und Inhalt gesichert (`content_snapshot`), damit Entscheidung und Begründung auch nach dem
+Entfernen nachvollziehbar bleiben; die Admin-Ansicht zeigt dann den gesicherten Stand (`contentDeleted: true`).
+Nach einer Entscheidung bekommen Melder eine Mail mit dem Ergebnis, bei REMOVED auch die Verfasser (mit Begründung und
+Hinweis auf Widerspruch per Antwort-Mail). Im Datenexport stehen die eigenen gemeldeten Inhalte unter
+`meldungen_zu_eigenen_inhalten`.
 
 ### Admins
 
