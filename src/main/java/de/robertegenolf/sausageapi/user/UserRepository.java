@@ -83,11 +83,16 @@ public class UserRepository {
 	 * Da Benutzernamen kein "@" enthalten dürfen, kann ein fremder Account den E-Mail-Login nicht überdecken.
 	 */
 	public Optional<StoredUser> findByLogin(String login) {
+		return findByLogin(login, false);
+	}
+
+	/** Wie {@link #findByLogin(String)}, auf Wunsch auch gesperrte Accounts (nur für DSGVO-Export und -Löschung). */
+	Optional<StoredUser> findByLogin(String login, boolean includeDisabled) {
 		String where = login.contains("@") ? "lower(email) = lower(:login)" : "username = :login";
 		return jdbc.sql("""
 				SELECT id, username, password_hash, role, token_version, created_at FROM app_user
-				WHERE %s AND enabled
-				""".formatted(where))
+				WHERE %s%s
+				""".formatted(where, includeDisabled ? "" : " AND enabled"))
 				.param("login", login)
 				.query((rs, n) -> new StoredUser(rs.getLong("id"), rs.getString("username"),
 						rs.getString("password_hash"), rs.getString("role"), rs.getInt("token_version"),

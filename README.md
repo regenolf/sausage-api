@@ -138,6 +138,13 @@ deutscher Meldung in `detail`; bei Validierungsfehlern stehen die betroffenen Fe
 E-Mails gehen per SMTP raus (`SPRING_MAIL_HOST`, `_PORT`, `_USERNAME`, `_PASSWORD`, Absender `MAIL_FROM`); ohne
 `SPRING_MAIL_HOST` werden sie nur ins Log geschrieben. Links zeigen auf `FRONTEND_URL` bzw. `PUBLIC_URL`.
 
+### Datenschutz ohne Anmeldung (gesperrte Konten)
+
+| Methode | Pfad | Beschreibung |
+|---|---|---|
+| `POST` | `/api/auth/data/export` | `{"login":"…","password":"…"}` → alle eigenen Daten als JSON-Datei, auch für gesperrte Konten (Art. 15/20 DSGVO); gedrosselt wie der Login |
+| `POST` | `/api/auth/data/delete` | `{"login":"…","password":"…"}` → 204, Konto gelöscht (Art. 17 DSGVO) |
+
 ### Suchmaschinen und Link-Vorschauen
 
 | Methode | Pfad | Beschreibung |
