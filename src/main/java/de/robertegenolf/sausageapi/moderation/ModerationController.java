@@ -83,7 +83,9 @@ class ModerationController {
 			HttpServletRequest http) {
 		Long reporterId = isAnonymous(auth) ? null
 				: users.findByUsername(auth.getName()).map(UserRepository.StoredUser::id).orElse(null);
-		String email = request.email() == null || request.email().isBlank() ? null : request.email().trim();
+		// Angemeldete erreichen wir über ihr Konto – eine zusätzliche Adresse würde ohne Export und Löschung liegen bleiben
+		String email = reporterId != null || request.email() == null || request.email().isBlank() ? null
+				: request.email().trim();
 		if (reporterId == null && email == null) {
 			throw new ResponseStatusException(HttpStatus.BAD_REQUEST,
 					"Bitte eine E-Mail-Adresse angeben oder anmelden, damit wir dich über die Entscheidung informieren können");
@@ -117,6 +119,7 @@ class ModerationController {
 	@Transactional
 	@PutMapping("/admin/reports/{id}")
 	ReportView decide(@PathVariable long id, @Valid @RequestBody DecisionRequest request, Authentication auth) {
+		reports.lock(id);
 		StoredReport report = reports.find(id)
 				.orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "Meldung " + id + " nicht gefunden"));
 		if (report.status() != Status.OPEN) {
@@ -126,6 +129,10 @@ class ModerationController {
 		String note = blankToNull(request.note());
 		switch (request.decision()) {
 			case REMOVED -> {
+				if (report.targetType() == TargetType.SPOT) {
+					reports.decideOpenForSpotContent(report.targetId(), Status.REMOVED,
+							note == null ? "Bude entfernt" : note, adminId);
+				}
 				reports.deleteTarget(report.targetType(), report.targetId());
 				reports.decideAllOpen(report.targetType(), report.targetId(), Status.REMOVED, note, adminId);
 			}

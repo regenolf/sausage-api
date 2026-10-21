@@ -120,6 +120,31 @@ class ReportRepository {
 				.update();
 	}
 
+	/** Sperrt die Meldung bis Transaktionsende, damit zwei Admins sie nicht gleichzeitig entscheiden. */
+	void lock(long id) {
+		jdbc.sql("SELECT id FROM report WHERE id = :id FOR UPDATE").param("id", id).query(Long.class).optional();
+	}
+
+	/**
+	 * Vor dem Entfernen eines Spots: offene Meldungen zu seinen Bewertungen, Kommentaren und Fotos mit entscheiden –
+	 * die Inhalte verschwinden per Kaskade, die Meldungen blieben sonst ohne Inhalt dauerhaft offen.
+	 */
+	void decideOpenForSpotContent(long spotId, Status status, String note, long decidedBy) {
+		jdbc.sql("""
+				UPDATE report SET status = :status, decision_note = :note, decided_by = :decidedBy,
+				                  decided_at = CURRENT_TIMESTAMP
+				WHERE status = 'OPEN' AND (
+				      (target_type = 'RATING' AND target_id IN (SELECT id FROM rating WHERE spot_id = :spotId))
+				   OR (target_type = 'COMMENT' AND target_id IN (SELECT id FROM comment WHERE spot_id = :spotId))
+				   OR (target_type = 'PHOTO' AND target_id IN (SELECT id FROM spot_photo WHERE spot_id = :spotId)))
+				""")
+				.param("status", status.name())
+				.param("note", note)
+				.param("decidedBy", decidedBy)
+				.param("spotId", spotId)
+				.update();
+	}
+
 	/** Entscheidet alle offenen Meldungen zum selben Inhalt gleich mit. */
 	void decideAllOpen(TargetType type, long targetId, Status status, String note, long decidedBy) {
 		jdbc.sql("""

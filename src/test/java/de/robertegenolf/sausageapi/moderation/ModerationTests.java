@@ -127,6 +127,39 @@ class ModerationTests {
 	}
 
 	@Test
+	void spotEntfernenSchliesstMeldungenZuSeinenInhalten() throws Exception {
+		String author = register();
+		String reporter = register();
+		String admin = register();
+		jdbc.sql("UPDATE app_user SET role = 'ADMIN' WHERE username = :u").param("u", admin).update();
+		long spotId = createSpot(author);
+		String location = mvc.perform(post("/api/spots/" + spotId + "/comments").with(httpBasic(author, PASSWORD))
+						.contentType(MediaType.APPLICATION_JSON).content("{\"text\":\"Werbung\"}"))
+				.andReturn().getResponse().getHeader("Location");
+		long commentId = Long.parseLong(location.substring(location.lastIndexOf('/') + 1));
+
+		// Angemeldet: eine zusätzlich angegebene E-Mail wird nicht gespeichert
+		long commentReport = reportId(mvc.perform(post("/api/reports").with(httpBasic(reporter, PASSWORD))
+				.contentType(MediaType.APPLICATION_JSON).content(report("COMMENT", commentId, "SPAM", "privat@test.de")))
+				.andExpect(status().isCreated()).andReturn().getResponse().getContentAsString());
+		long spotReport = reportId(mvc.perform(post("/api/reports").with(httpBasic(reporter, PASSWORD))
+				.contentType(MediaType.APPLICATION_JSON).content(report("SPOT", spotId, "ILLEGAL", null)))
+				.andExpect(status().isCreated()).andReturn().getResponse().getContentAsString());
+		mvc.perform(get("/api/admin/reports").with(httpBasic(admin, PASSWORD)))
+				.andExpect(jsonPath("$[?(@.id == " + commentReport + ")].reporterEmail").value(org.hamcrest.Matchers.contains(org.hamcrest.Matchers.nullValue())));
+
+		mvc.perform(put("/api/admin/reports/" + spotReport).with(httpBasic(admin, PASSWORD))
+						.contentType(MediaType.APPLICATION_JSON).content("{\"decision\":\"REMOVED\"}"))
+				.andExpect(status().isOk());
+		mvc.perform(get("/api/users/me/reports").with(httpBasic(reporter, PASSWORD)))
+				.andExpect(jsonPath("$[?(@.id == " + commentReport + ")].status").value("REMOVED"))
+				.andExpect(jsonPath("$[?(@.id == " + spotReport + ")].status").value("REMOVED"));
+		mvc.perform(put("/api/admin/reports/" + commentReport).with(httpBasic(admin, PASSWORD))
+						.contentType(MediaType.APPLICATION_JSON).content("{\"decision\":\"REJECTED\"}"))
+				.andExpect(status().isConflict());
+	}
+
+	@Test
 	void adminSperrtUndEntsperrtAccounts() throws Exception {
 		String user = register();
 		String admin = register();

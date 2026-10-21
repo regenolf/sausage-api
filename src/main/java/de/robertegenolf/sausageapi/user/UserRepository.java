@@ -9,7 +9,9 @@ import java.util.Optional;
 @Repository
 public class UserRepository {
 
-	public record StoredUser(long id, String username, String passwordHash, String role, int tokenVersion) {
+	/** {@code createdAt}: Zeitpunkt der Registrierung – ältere Tokens können nicht zu diesem Account gehören. */
+	public record StoredUser(long id, String username, String passwordHash, String role, int tokenVersion,
+			Instant createdAt) {
 	}
 
 	/**
@@ -46,6 +48,16 @@ public class UserRepository {
 		return java.text.Normalizer.normalize(username.trim(), java.text.Normalizer.Form.NFKC);
 	}
 
+	private static final java.util.regex.Pattern USERNAME_REGEX = java.util.regex.Pattern.compile(USERNAME_PATTERN);
+
+	/**
+	 * Prüft den bereits normalisierten Namen erneut: NFKC kann Zeichen vervielfachen (z. B. U+FDFA → 18 Zeichen)
+	 * oder in nicht erlaubte umwandeln (½ → 1⁄2), die Bean-Validation sieht aber nur die Eingabe.
+	 */
+	public static boolean isValidNormalizedUsername(String username) {
+		return username.length() >= 3 && username.length() <= 50 && USERNAME_REGEX.matcher(username).matches();
+	}
+
 	/** Namen, die nach Betreiber oder Moderation aussehen (Groß-/Kleinschreibung und Trennzeichen egal). */
 	public static boolean isReservedUsername(String username) {
 		return RESERVED_USERNAMES.contains(username.toLowerCase(java.util.Locale.ROOT).replaceAll("[ ._-]", ""));
@@ -58,10 +70,11 @@ public class UserRepository {
 	}
 
 	public Optional<StoredUser> findByUsername(String username) {
-		return jdbc.sql("SELECT id, username, password_hash, role, token_version FROM app_user WHERE username = :username AND enabled")
+		return jdbc.sql("SELECT id, username, password_hash, role, token_version, created_at FROM app_user WHERE username = :username AND enabled")
 				.param("username", username)
 				.query((rs, n) -> new StoredUser(rs.getLong("id"), rs.getString("username"),
-						rs.getString("password_hash"), rs.getString("role"), rs.getInt("token_version")))
+						rs.getString("password_hash"), rs.getString("role"), rs.getInt("token_version"),
+						rs.getTimestamp("created_at").toInstant()))
 				.optional();
 	}
 
@@ -72,12 +85,13 @@ public class UserRepository {
 	public Optional<StoredUser> findByLogin(String login) {
 		String where = login.contains("@") ? "lower(email) = lower(:login)" : "username = :login";
 		return jdbc.sql("""
-				SELECT id, username, password_hash, role, token_version FROM app_user
+				SELECT id, username, password_hash, role, token_version, created_at FROM app_user
 				WHERE %s AND enabled
 				""".formatted(where))
 				.param("login", login)
 				.query((rs, n) -> new StoredUser(rs.getLong("id"), rs.getString("username"),
-						rs.getString("password_hash"), rs.getString("role"), rs.getInt("token_version")))
+						rs.getString("password_hash"), rs.getString("role"), rs.getInt("token_version"),
+						rs.getTimestamp("created_at").toInstant()))
 				.optional();
 	}
 
