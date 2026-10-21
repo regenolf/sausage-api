@@ -1042,6 +1042,69 @@ class SpotApiTests {
 				.andExpect(jsonPath("$[0].coverPhotoUrl").value(org.hamcrest.Matchers.nullValue()));
 	}
 
+	@Test
+	void altesTokenGiltNichtFuerNeuesKontoMitGleichemNamen() throws Exception {
+		String name = newName();
+		register(name);
+		String oldToken = token(name);
+		mvc.perform(delete("/api/users/me").with(httpBasic(name, PASSWORD))
+						.contentType(MediaType.APPLICATION_JSON).content("{\"password\":\"" + PASSWORD + "\"}"))
+				.andExpect(status().isNoContent());
+		register(name);
+
+		mvc.perform(get("/api/users/me").header("Authorization", "Bearer " + oldToken))
+				.andExpect(status().isUnauthorized());
+		mvc.perform(get("/api/users/me").header("Authorization", "Bearer " + token(name)))
+				.andExpect(status().isOk());
+	}
+
+	@Test
+	void zuLangePasswoerterUndNormalisierteNamenLiefern400() throws Exception {
+		String name = newName();
+		// 40 Zeichen, aber 80 Byte – mehr als BCrypt verarbeitet
+		mvc.perform(post("/api/users").contentType(MediaType.APPLICATION_JSON).content("""
+						{"username":"%s","email":"%s@test.de","acceptTerms":true,"password":"%s"}
+						""".formatted(name, name, "ä".repeat(40))))
+				.andExpect(status().isBadRequest())
+				.andExpect(jsonPath("$.errors.password").exists());
+		// U+FDFA wird per NFKC zu 18 Zeichen: 3 davon sprengen die 50 Zeichen
+		mvc.perform(post("/api/users").contentType(MediaType.APPLICATION_JSON).content("""
+						{"username":"\uFDFA\uFDFA\uFDFA","email":"%s@test.de","acceptTerms":true,"password":"%s"}
+						""".formatted(name, PASSWORD)))
+				.andExpect(status().isBadRequest());
+		mvc.perform(post("/api/auth/register").contentType(MediaType.APPLICATION_JSON).content("""
+						{"displayName":"\uFDFA\uFDFA\uFDFA","email":"%s@test.de","acceptTerms":true,"password":"%s"}
+						""".formatted(name, PASSWORD)))
+				.andExpect(status().isBadRequest());
+
+		register(name);
+		mvc.perform(put("/api/users/me/password").with(httpBasic(name, PASSWORD)).contentType(MediaType.APPLICATION_JSON)
+						.content("{\"currentPassword\":\"" + PASSWORD + "\",\"newPassword\":\"" + "x".repeat(73) + "\"}"))
+				.andExpect(status().isBadRequest());
+	}
+
+	@Test
+	void adminLoeschtNurBewertungenDesAngegebenenSpots() throws Exception {
+		String author = newName();
+		String admin = newName();
+		register(author);
+		register(admin);
+		jdbc.sql("UPDATE app_user SET role = 'ADMIN' WHERE username = :u").param("u", admin).update();
+		long spotA = createSpot(author, "A " + author);
+		long spotB = createSpot(author, "B " + author);
+		mvc.perform(post("/api/spots/" + spotB + "/ratings").with(httpBasic(author, PASSWORD))
+						.contentType(MediaType.APPLICATION_JSON).content("{\"score\":4}"))
+				.andExpect(status().isOk());
+		int ratingId = JsonPath.read(mvc.perform(get("/api/spots/" + spotB + "/ratings"))
+				.andReturn().getResponse().getContentAsString(), "$[0].id");
+
+		mvc.perform(delete("/api/spots/" + spotA + "/ratings/" + ratingId).with(httpBasic(admin, PASSWORD)))
+				.andExpect(status().isNotFound());
+		mvc.perform(get("/api/spots/" + spotB + "/ratings")).andExpect(jsonPath("$.length()").value(1));
+		mvc.perform(delete("/api/spots/" + spotB + "/ratings/" + ratingId).with(httpBasic(admin, PASSWORD)))
+				.andExpect(status().isOk());
+	}
+
 	private String token(String username) throws Exception {
 		String json = mvc.perform(post("/api/auth/token").with(httpBasic(username, PASSWORD)))
 				.andExpect(status().isOk())

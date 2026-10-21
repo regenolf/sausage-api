@@ -40,7 +40,7 @@ class UserController {
 			@NotBlank @Size(min = 3, max = 50) @Pattern(regexp = UserRepository.USERNAME_PATTERN,
 					message = UserRepository.USERNAME_MESSAGE) String username,
 			@NotBlank @Email @Size(max = 255) String email,
-			@NotBlank @Size(min = 8, max = 100) String password,
+			@NotBlank @Size(min = 8, max = 72) @BcryptPassword String password,
 			/**
 			 * Nutzungsbedingungen akzeptiert und Mindestalter (16) bestätigt. Noch optional, bis die App das Feld
 			 * mitschickt; danach mit @NotNull zur Pflicht machen. {@code false} wird abgelehnt.
@@ -59,7 +59,7 @@ class UserController {
 
 	public record ChangePasswordRequest(
 			@NotBlank String currentPassword,
-			@NotBlank @Size(min = 8, max = 100) String newPassword) {
+			@NotBlank @Size(min = 8, max = 72) @BcryptPassword String newPassword) {
 	}
 
 	private final UserRepository repository;
@@ -86,6 +86,10 @@ class UserController {
 	ResponseEntity<RegisteredUser> register(@Valid @RequestBody RegisterRequest request, HttpServletRequest http) {
 		throttle.checkRegistration(http.getRemoteAddr());
 		String username = UserRepository.normalizeUsername(request.username());
+		if (!UserRepository.isValidNormalizedUsername(username)) {
+			throw new ResponseStatusException(HttpStatus.BAD_REQUEST,
+					"Benutzername: 3–50 Zeichen, " + UserRepository.USERNAME_MESSAGE);
+		}
 		if (UserRepository.isReservedUsername(username)) {
 			throw new ResponseStatusException(HttpStatus.CONFLICT, "Dieser Benutzername ist reserviert");
 		}

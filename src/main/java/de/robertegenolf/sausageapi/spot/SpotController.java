@@ -191,7 +191,9 @@ class SpotController {
 	@Transactional
 	@DeleteMapping("/spots/{id}/ratings/{ratingId}")
 	SpotDetail deleteRating(@PathVariable long id, @PathVariable long ratingId, Authentication auth) {
-		if (!isAdmin(auth) && requireRatingAuthor(id, ratingId) != currentUserId(auth)) {
+		// Immer prüfen, dass die Bewertung zu diesem Spot gehört – auch für Admins
+		long authorId = requireRatingAuthor(id, ratingId);
+		if (!isAdmin(auth) && authorId != currentUserId(auth)) {
 			throw new ResponseStatusException(HttpStatus.FORBIDDEN, "Nur eigene Bewertungen dürfen gelöscht werden");
 		}
 		repository.deleteRatingById(ratingId);
