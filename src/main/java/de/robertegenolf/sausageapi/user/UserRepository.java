@@ -20,6 +20,13 @@ public class UserRepository {
 			String termsVersion, Instant termsAcceptedAt, String currentTermsVersion) {
 	}
 
+	/** Account aus Sicht der Moderation (ohne Passwort-Hash). */
+	public record AdminUser(String username, String email, String role, boolean enabled, Instant createdAt) {
+	}
+
+	/** Höchstzahl der Treffer in der Admin-Suche – für mehr den Suchbegriff verfeinern. */
+	public static final int ADMIN_SEARCH_LIMIT = 100;
+
 	/**
 	 * Erlaubt sind Buchstaben, Ziffern, Leerzeichen, Punkt, Unterstrich und Bindestrich; Anfang und Ende müssen
 	 * Buchstabe oder Ziffer sein. Damit ist der Name kein E-Mail-Login ("@"), bricht Basic Auth nicht (":") und ist
@@ -118,6 +125,30 @@ public class UserRepository {
 				.param("enabled", enabled)
 				.param("username", username)
 				.update() > 0;
+	}
+
+	/**
+	 * Accounts für die Moderation, alphabetisch; {@code enabled} null = alle, {@code query} sucht (ohne
+	 * Groß-/Kleinschreibung) in Benutzername und E-Mail.
+	 */
+	public java.util.List<AdminUser> findForAdmin(Boolean enabled, String query) {
+		String pattern = query == null || query.isBlank() ? null
+				: "%" + query.trim().toLowerCase(java.util.Locale.ROOT).replace("\\", "\\\\").replace("%", "\\%")
+						.replace("_", "\\_") + "%";
+		return jdbc.sql("""
+				SELECT username, email, role, enabled, created_at FROM app_user
+				WHERE (CAST(:enabled AS boolean) IS NULL OR enabled = CAST(:enabled AS boolean))
+				  AND (CAST(:pattern AS varchar) IS NULL OR LOWER(username) LIKE CAST(:pattern AS varchar)
+				       OR LOWER(email) LIKE CAST(:pattern AS varchar))
+				ORDER BY LOWER(username)
+				LIMIT :limit
+				""")
+				.param("enabled", enabled)
+				.param("pattern", pattern)
+				.param("limit", ADMIN_SEARCH_LIMIT)
+				.query((rs, n) -> new AdminUser(rs.getString("username"), rs.getString("email"), rs.getString("role"),
+						rs.getBoolean("enabled"), rs.getTimestamp("created_at").toInstant()))
+				.list();
 	}
 
 	void delete(long id) {

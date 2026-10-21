@@ -161,6 +161,37 @@ class ModerationTests {
 				.andExpect(status().isNotFound());
 	}
 
+	@Test
+	void adminFindetGesperrteAccounts() throws Exception {
+		String user = register();
+		String blocked = register();
+		String admin = register();
+		jdbc.sql("UPDATE app_user SET role = 'ADMIN' WHERE username = :u").param("u", admin).update();
+		mvc.perform(put("/api/admin/users/" + blocked + "/status").with(httpBasic(admin, PASSWORD))
+						.contentType(MediaType.APPLICATION_JSON).content("{\"enabled\":false}"))
+				.andExpect(status().isNoContent());
+
+		mvc.perform(get("/api/admin/users").with(httpBasic(user, PASSWORD))).andExpect(status().isForbidden());
+		mvc.perform(get("/api/admin/users").param("status", "DISABLED").param("q", blocked.toUpperCase())
+						.with(httpBasic(admin, PASSWORD)))
+				.andExpect(status().isOk())
+				.andExpect(jsonPath("$.length()").value(1))
+				.andExpect(jsonPath("$[0].username").value(blocked))
+				.andExpect(jsonPath("$[0].email").value(blocked + "@test.de"))
+				.andExpect(jsonPath("$[0].enabled").value(false))
+				.andExpect(jsonPath("$[0].passwordHash").doesNotExist());
+		mvc.perform(get("/api/admin/users").param("status", "ENABLED").param("q", blocked)
+						.with(httpBasic(admin, PASSWORD)))
+				.andExpect(jsonPath("$.length()").value(0));
+		// Suche nach E-Mail; "_" und "%" sind keine Platzhalter
+		mvc.perform(get("/api/admin/users").param("q", user + "@test").with(httpBasic(admin, PASSWORD)))
+				.andExpect(jsonPath("$[0].username").value(user));
+		mvc.perform(get("/api/admin/users").param("q", "%").with(httpBasic(admin, PASSWORD)))
+				.andExpect(jsonPath("$.length()").value(0));
+		mvc.perform(get("/api/admin/users").param("status", "GESPERRT").with(httpBasic(admin, PASSWORD)))
+				.andExpect(status().isBadRequest());
+	}
+
 	private String register() throws Exception {
 		String name = "m" + UUID.randomUUID().toString().substring(0, 8);
 		mvc.perform(post("/api/users").contentType(MediaType.APPLICATION_JSON)

@@ -134,6 +134,7 @@ deutscher Meldung in `detail`; bei Validierungsfehlern stehen die betroffenen Fe
 | `GET` | `/api/users/me/reports` | Eigene Meldungen mit Entscheidung und Begründung 🔒 |
 | `GET` | `/api/admin/reports?status=OPEN` | Meldungen mit Vorschau des Inhalts (`OPEN`, `REMOVED`, `REJECTED`, `ALL`) 🔒 Admin |
 | `PUT` | `/api/admin/reports/{id}` | Entscheiden: `{"decision":"REMOVED"\|"REJECTED","note":"Begründung"}`; REMOVED löscht den Inhalt und erledigt alle offenen Meldungen dazu 🔒 Admin |
+| `GET` | `/api/admin/users?status=DISABLED&q=…` | Accounts suchen (`ENABLED`, `DISABLED`, `ALL`; `q` in Benutzername und E-Mail, max. 100 Treffer), z. B. gesperrte zum Entsperren 🔒 Admin |
 | `PUT` | `/api/admin/users/{username}/status` | Account sperren/entsperren `{"enabled":false}`; Tokens werden sofort ungültig 🔒 Admin |
 
 Admins dürfen außerdem fremde Spots bearbeiten und löschen sowie Bewertungen, Kommentare und Fotos löschen.
