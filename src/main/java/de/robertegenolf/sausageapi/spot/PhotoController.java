@@ -2,6 +2,7 @@ package de.robertegenolf.sausageapi.spot;
 
 import de.robertegenolf.sausageapi.spot.SpotDtos.SpotPhoto;
 import de.robertegenolf.sausageapi.user.UserRepository;
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.http.CacheControl;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.MediaType;
@@ -34,11 +35,14 @@ class PhotoController {
 	private final PhotoRepository photos;
 	private final SpotRepository spots;
 	private final UserRepository users;
+	private final long dailyQuotaBytes;
 
-	PhotoController(PhotoRepository photos, SpotRepository spots, UserRepository users) {
+	PhotoController(PhotoRepository photos, SpotRepository spots, UserRepository users,
+			@Value("${app.photos.daily-quota-bytes:52428800}") long dailyQuotaBytes) {
 		this.photos = photos;
 		this.spots = spots;
 		this.users = users;
+		this.dailyQuotaBytes = dailyQuotaBytes;
 	}
 
 	@GetMapping
@@ -89,6 +93,13 @@ class PhotoController {
 					"Pro Spot sind höchstens " + MAX_PHOTOS_PER_SPOT + " Fotos erlaubt");
 		}
 		long userId = currentUserId(auth);
+		// Tageskontingent gegen Speicher-Missbrauch (Spots kann jeder beliebig viele anlegen); Admins ausgenommen
+		boolean admin = auth.getAuthorities().stream().anyMatch(a -> "ROLE_ADMIN".equals(a.getAuthority()));
+		if (!admin && photos.bytesUploadedLastDay(userId) + data.length > dailyQuotaBytes) {
+			throw new ResponseStatusException(HttpStatus.TOO_MANY_REQUESTS,
+					"Tageslimit für Fotos erreicht (" + dailyQuotaBytes / (1024 * 1024)
+							+ " MB in 24 Stunden). Bitte später erneut versuchen.");
+		}
 		long id = photos.create(spotId, userId, contentType, data);
 		SpotPhoto created = new SpotPhoto(id, photos.url(spotId, id), auth.getName(), contentType,
 				data.length, Instant.now());

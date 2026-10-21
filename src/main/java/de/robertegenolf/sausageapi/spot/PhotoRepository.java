@@ -73,6 +73,17 @@ class PhotoRepository {
 				.optional();
 	}
 
+	/** Gespeicherte Bytes einer Person in den letzten 24 Stunden (für das Tageskontingent). */
+	long bytesUploadedLastDay(long userId) {
+		return jdbc.sql("""
+				SELECT COALESCE(SUM(size_bytes), 0) FROM spot_photo
+				WHERE user_id = :userId AND created_at > CURRENT_TIMESTAMP - INTERVAL '24 hours'
+				""")
+				.param("userId", userId)
+				.query(Long.class)
+				.single();
+	}
+
 	long countBySpot(long spotId) {
 		return jdbc.sql("SELECT COUNT(*) FROM spot_photo WHERE spot_id = :spotId")
 				.param("spotId", spotId)
