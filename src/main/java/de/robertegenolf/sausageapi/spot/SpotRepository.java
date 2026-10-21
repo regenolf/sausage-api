@@ -38,6 +38,22 @@ class SpotRepository {
 
 	private static final String SPOT_GROUP_BY = "GROUP BY s.id, c.code, u.username\n";
 
+	/**
+	 * Für Listen: SPOT_SELECT plus erstes Foto als Vorschaubild (ohne Fotos von Nutzern, die :viewerId blockiert
+	 * hat). Der LATERAL-Join liefert höchstens eine Zeile je Spot und vervielfacht die Bewertungen nicht.
+	 */
+	private static final String LIST_SELECT = SPOT_SELECT.replace("COUNT(r.id) AS rating_count",
+			"COUNT(r.id) AS rating_count, cover.id AS cover_photo_id") + """
+			LEFT JOIN LATERAL (
+			    SELECT p.id FROM spot_photo p
+			    WHERE p.spot_id = s.id AND %s
+			    ORDER BY p.created_at, p.id
+			    LIMIT 1
+			) cover ON true
+			""".formatted(SpotRepository.NOT_BLOCKED.formatted("p.user_id"));
+
+	private static final String LIST_GROUP_BY = "GROUP BY s.id, c.code, u.username, cover.id\n";
+
 	/** Haversine-Distanz in km zwischen Spot (Tabellen-Alias als Platzhalter) und (:latitude, :longitude). */
 	private static final String DISTANCE_KM = """
 			6371 * 2 * asin(sqrt(
@@ -45,15 +61,15 @@ class SpotRepository {
 			        + cos(radians(:latitude)) * cos(radians(%1$s.latitude))
 			        * power(sin(radians(%1$s.longitude - :longitude) / 2), 2)))""";
 
-	private static final RowMapper<SpotSummary> SPOT_SUMMARY = (rs, n) -> new SpotSummary(rs.getLong("id"),
+	private final RowMapper<SpotSummary> spotSummary = (rs, n) -> new SpotSummary(rs.getLong("id"),
 			rs.getString("category_code"), rs.getString("name"), rs.getString("city"),
 			rs.getBigDecimal("latitude"), rs.getBigDecimal("longitude"),
-			averageRating(rs), rs.getLong("rating_count"));
+			averageRating(rs), rs.getLong("rating_count"), coverPhotoUrl(rs));
 
-	private static final RowMapper<NearbySpot> NEARBY_SPOT = (rs, n) -> new NearbySpot(rs.getLong("id"),
+	private final RowMapper<NearbySpot> nearbySpot = (rs, n) -> new NearbySpot(rs.getLong("id"),
 			rs.getString("category_code"), rs.getString("name"), rs.getString("city"),
 			rs.getBigDecimal("latitude"), rs.getBigDecimal("longitude"),
-			averageRating(rs), rs.getLong("rating_count"), rs.getDouble("distance_km"));
+			averageRating(rs), rs.getLong("rating_count"), rs.getDouble("distance_km"), coverPhotoUrl(rs));
 
 	private static final RowMapper<SpotDetail> SPOT_DETAIL = (rs, n) -> new SpotDetail(rs.getLong("id"),
 			rs.getString("category_code"), rs.getString("name"), rs.getString("description"),
@@ -68,9 +84,16 @@ class SpotRepository {
 			List.of());
 
 	private final JdbcClient jdbc;
+	private final PhotoRepository photos;
 
-	SpotRepository(JdbcClient jdbc) {
+	SpotRepository(JdbcClient jdbc, PhotoRepository photos) {
 		this.jdbc = jdbc;
+		this.photos = photos;
+	}
+
+	private String coverPhotoUrl(java.sql.ResultSet rs) throws java.sql.SQLException {
+		long photoId = rs.getLong("cover_photo_id");
+		return rs.wasNull() ? null : photos.url(rs.getLong("id"), photoId);
 	}
 
 	List<Category> findCategories() {
@@ -100,9 +123,9 @@ class SpotRepository {
 				.single();
 	}
 
-	/** {@code limit == null} liefert alle Treffer. */
-	List<SpotSummary> findSpots(String categoryCode, String search, Integer limit, long offset) {
-		String sql = SPOT_SELECT + SPOT_FILTER + SPOT_GROUP_BY + """
+	/** {@code limit == null} liefert alle Treffer; {@code viewerId} für das Vorschaubild (-1 = anonym). */
+	List<SpotSummary> findSpots(String categoryCode, String search, Integer limit, long offset, long viewerId) {
+		String sql = LIST_SELECT + SPOT_FILTER + LIST_GROUP_BY + """
 				ORDER BY s.name, s.id
 				LIMIT CAST(:limit AS integer) OFFSET :offset
 				""";
@@ -111,15 +134,17 @@ class SpotRepository {
 				.param("search", escapeLike(search))
 				.param("limit", limit)
 				.param("offset", offset)
-				.query(SPOT_SUMMARY)
+				.param("viewerId", viewerId)
+				.query(spotSummary)
 				.list();
 	}
 
 	List<SpotSummary> findSpotsByCreator(long userId) {
-		String sql = SPOT_SELECT + "WHERE s.created_by = :userId\n" + SPOT_GROUP_BY + "ORDER BY s.created_at DESC, s.id DESC\n";
+		String sql = LIST_SELECT + "WHERE s.created_by = :userId\n" + LIST_GROUP_BY + "ORDER BY s.created_at DESC, s.id DESC\n";
 		return jdbc.sql(sql)
 				.param("userId", userId)
-				.query(SPOT_SUMMARY)
+				.param("viewerId", userId)
+				.query(spotSummary)
 				.list();
 	}
 
@@ -134,13 +159,14 @@ class SpotRepository {
 				.single();
 	}
 
-	List<NearbySpot> findSpotsNear(double latitude, double longitude, double radiusKm, String categoryCode) {
+	List<NearbySpot> findSpotsNear(double latitude, double longitude, double radiusKm, String categoryCode,
+			long viewerId) {
 		String sql = "SELECT spots.*, " + DISTANCE_KM.formatted("spots") + " AS distance_km\nFROM (\n"
-				+ SPOT_SELECT + """
+				+ LIST_SELECT + """
 				WHERE (CAST(:categoryCode AS varchar) IS NULL OR c.code = :categoryCode)
 				  AND s.latitude BETWEEN :minLat AND :maxLat
 				  AND s.longitude BETWEEN :minLon AND :maxLon
-				  AND\s""" + DISTANCE_KM.formatted("s") + " <= :radiusKm\n" + SPOT_GROUP_BY + """
+				  AND\s""" + DISTANCE_KM.formatted("s") + " <= :radiusKm\n" + LIST_GROUP_BY + """
 				) spots
 				ORDER BY distance_km, name
 				""";
@@ -154,7 +180,8 @@ class SpotRepository {
 				.param("minLon", box.minLon())
 				.param("maxLon", box.maxLon())
 				.param("categoryCode", categoryCode)
-				.query(NEARBY_SPOT)
+				.param("viewerId", viewerId)
+				.query(nearbySpot)
 				.list();
 	}
 

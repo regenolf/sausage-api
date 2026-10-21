@@ -28,13 +28,14 @@ public final class SpotDtos {
 			@Size(max = 500) String description) {
 	}
 
+	/** {@code coverPhotoUrl}: erstes Foto (ohne Fotos blockierter Nutzer) als Vorschaubild, null ohne Fotos. */
 	public record SpotSummary(long id, String categoryCode, String name, String city,
-			BigDecimal latitude, BigDecimal longitude, Double averageRating, long ratingCount) {
+			BigDecimal latitude, BigDecimal longitude, Double averageRating, long ratingCount, String coverPhotoUrl) {
 	}
 
 	public record NearbySpot(long id, String categoryCode, String name, String city,
 			BigDecimal latitude, BigDecimal longitude, Double averageRating, long ratingCount,
-			double distanceKm) {
+			double distanceKm, String coverPhotoUrl) {
 	}
 
 	public record SpotDetail(long id, String categoryCode, String name, String description,
