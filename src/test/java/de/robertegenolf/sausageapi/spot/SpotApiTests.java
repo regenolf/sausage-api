@@ -1004,6 +1004,44 @@ class SpotApiTests {
 				.andExpect(jsonPath("$.detail").value(org.hamcrest.Matchers.containsString("zu groß")));
 	}
 
+	@Test
+	void listenZeigenErstesFotoAlsVorschaubild() throws Exception {
+		String owner = newName();
+		String viewer = newName();
+		register(owner);
+		register(viewer);
+		String name = "Vorschau " + owner;
+		long spotId = createSpot(owner, name, 48.1, 11.5);
+		BufferedImage image = new BufferedImage(4, 4, BufferedImage.TYPE_INT_RGB);
+		ByteArrayOutputStream buffer = new ByteArrayOutputStream();
+		ImageIO.write(image, "png", buffer);
+
+		mvc.perform(get("/api/spots").param("q", name))
+				.andExpect(jsonPath("$[0].coverPhotoUrl").value(org.hamcrest.Matchers.nullValue()));
+		String first = JsonPath.read(mvc.perform(multipart("/api/spots/" + spotId + "/photos").with(httpBasic(owner, PASSWORD))
+						.file(new MockMultipartFile("file", "a.png", "image/png", buffer.toByteArray())))
+				.andExpect(status().isCreated()).andReturn().getResponse().getContentAsString(), "$.url");
+		mvc.perform(multipart("/api/spots/" + spotId + "/photos").with(httpBasic(owner, PASSWORD))
+						.file(new MockMultipartFile("file", "b.png", "image/png", buffer.toByteArray())))
+				.andExpect(status().isCreated());
+
+		// Liste, Umkreissuche und eigene Spots liefern dasselbe erste Foto
+		mvc.perform(get("/api/spots").param("q", name))
+				.andExpect(jsonPath("$[0].coverPhotoUrl").value(first))
+				.andExpect(jsonPath("$[0].ratingCount").value(0));
+		mvc.perform(get("/api/spots/nearby").param("latitude", "48.1").param("longitude", "11.5").param("radiusKm", "0.5"))
+				.andExpect(jsonPath("$[?(@.id == " + spotId + ")].coverPhotoUrl").value(first));
+		mvc.perform(get("/api/users/me/spots").with(httpBasic(owner, PASSWORD)))
+				.andExpect(jsonPath("$[0].coverPhotoUrl").value(first));
+
+		// Wer den Fotografen blockiert, bekommt kein Vorschaubild von ihm
+		mvc.perform(post("/api/users/me/blocks").with(httpBasic(viewer, PASSWORD)).contentType(MediaType.APPLICATION_JSON)
+						.content("{\"username\":\"" + owner + "\"}"))
+				.andExpect(status().isNoContent());
+		mvc.perform(get("/api/spots").param("q", name).with(httpBasic(viewer, PASSWORD)))
+				.andExpect(jsonPath("$[0].coverPhotoUrl").value(org.hamcrest.Matchers.nullValue()));
+	}
+
 	private String token(String username) throws Exception {
 		String json = mvc.perform(post("/api/auth/token").with(httpBasic(username, PASSWORD)))
 				.andExpect(status().isOk())

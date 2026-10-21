@@ -136,6 +136,23 @@ class ModerationController {
 		return view(reports.find(id).orElseThrow());
 	}
 
+	/**
+	 * Accounts suchen, z. B. gesperrte zum Entsperren: {@code status} ENABLED, DISABLED oder ALL (Standard),
+	 * {@code q} durchsucht Benutzername und E-Mail; höchstens {@value UserRepository#ADMIN_SEARCH_LIMIT} Treffer.
+	 */
+	@GetMapping("/admin/users")
+	List<UserRepository.AdminUser> adminUsers(@RequestParam(defaultValue = "ALL") String status,
+			@RequestParam(required = false) String q) {
+		Boolean enabled = switch (status.toUpperCase(java.util.Locale.ROOT)) {
+			case "ALL" -> null;
+			case "ENABLED" -> true;
+			case "DISABLED" -> false;
+			default -> throw new ResponseStatusException(HttpStatus.BAD_REQUEST,
+					"Unbekannter Status: " + status + " (erlaubt: ENABLED, DISABLED, ALL)");
+		};
+		return users.findForAdmin(enabled, q);
+	}
+
 	/** Sperrt oder entsperrt einen Account; gesperrte Accounts können sich nicht anmelden, Tokens werden ungültig. */
 	@PutMapping("/admin/users/{username}/status")
 	ResponseEntity<Void> setUserStatus(@PathVariable String username, @Valid @RequestBody UserStatusRequest request,
