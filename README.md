@@ -128,6 +128,16 @@ Listen (`/api/spots`, `/api/spots/nearby`, `/api/users/me/spots`) enthalten `cov
 Fehler kommen als [Problem Details](https://www.rfc-editor.org/rfc/rfc9457) (`application/problem+json`) mit
 deutscher Meldung in `detail`; bei Validierungsfehlern stehen die betroffenen Felder in `errors`.
 
+### Passwort vergessen
+
+| Methode | Pfad | Beschreibung |
+|---|---|---|
+| `POST` | `/api/auth/password-reset` | `{"email":"…"}` → immer 204; ist die Adresse registriert, kommt ein Link `…/reset-password?token=…` (60 Minuten gültig, einmal verwendbar, gespeichert nur als SHA-256-Hash). Limit pro IP und pro Adresse |
+| `POST` | `/api/auth/password-reset/confirm` | `{"token":"…","newPassword":"…"}` → 204, alle bisherigen Anmeldungen werden ungültig; 400 bei ungültigem/abgelaufenem Link |
+
+E-Mails gehen per SMTP raus (`SPRING_MAIL_HOST`, `_PORT`, `_USERNAME`, `_PASSWORD`, Absender `MAIL_FROM`); ohne
+`SPRING_MAIL_HOST` werden sie nur ins Log geschrieben. Links zeigen auf `FRONTEND_URL` bzw. `PUBLIC_URL`.
+
 ### Suchmaschinen und Link-Vorschauen
 
 | Methode | Pfad | Beschreibung |
