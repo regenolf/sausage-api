@@ -44,13 +44,17 @@ public class LoginThrottle {
 	private final FixedWindowRateLimiter registrations;
 	private final FixedWindowRateLimiter reports;
 	private final FixedWindowRateLimiter writes;
+	private final FixedWindowRateLimiter passwordResetsPerIp;
+	private final FixedWindowRateLimiter passwordResetsPerEmail;
 
 	LoginThrottle(@Value("${app.rate-limit.enabled:true}") boolean enabled,
 			@Value("${app.rate-limit.failed-logins-per-15-minutes:10}") int failedPerAccount,
 			@Value("${app.rate-limit.failed-logins-per-ip-per-15-minutes:100}") int failedPerIp,
 			@Value("${app.rate-limit.registrations-per-hour:10}") int registrationsPerHour,
 			@Value("${app.rate-limit.reports-per-hour:30}") int reportsPerHour,
-			@Value("${app.rate-limit.writes-per-hour:200}") int writesPerHour) {
+			@Value("${app.rate-limit.writes-per-hour:200}") int writesPerHour,
+			@Value("${app.rate-limit.password-resets-per-ip-per-hour:10}") int passwordResetsPerIp,
+			@Value("${app.rate-limit.password-resets-per-email-per-hour:3}") int passwordResetsPerEmail) {
 		this.enabled = enabled;
 		Clock clock = Clock.systemUTC();
 		this.failedPerAccount = new FixedWindowRateLimiter(failedPerAccount, Duration.ofMinutes(15), clock);
@@ -58,6 +62,8 @@ public class LoginThrottle {
 		this.registrations = new FixedWindowRateLimiter(registrationsPerHour, Duration.ofHours(1), clock);
 		this.reports = new FixedWindowRateLimiter(reportsPerHour, Duration.ofHours(1), clock);
 		this.writes = new FixedWindowRateLimiter(writesPerHour, Duration.ofHours(1), clock);
+		this.passwordResetsPerIp = new FixedWindowRateLimiter(passwordResetsPerIp, Duration.ofHours(1), clock);
+		this.passwordResetsPerEmail = new FixedWindowRateLimiter(passwordResetsPerEmail, Duration.ofHours(1), clock);
 	}
 
 	/** Wirft 429, wenn für diese IP und diesen Account zu viele Fehlversuche vorliegen. */
@@ -100,6 +106,26 @@ public class LoginThrottle {
 					reports.secondsUntilReset(ip));
 		}
 	}
+
+	/**
+	 * Zählt eine Anfrage „Passwort vergessen“: pro IP gegen Massenabfragen, pro Adresse, damit niemand ein fremdes
+	 * Postfach mit Mails flutet.
+	 */
+	public void checkPasswordReset(String ip, String email) {
+		ip = clientKey(ip);
+		if (!enabled) {
+			return;
+		}
+		String mailKey = email.toLowerCase(Locale.ROOT);
+		if (!passwordResetsPerIp.tryAcquire(ip)) {
+			throw new TooManyRequestsException(RESET_MESSAGE, passwordResetsPerIp.secondsUntilReset(ip));
+		}
+		if (!passwordResetsPerEmail.tryAcquire(mailKey)) {
+			throw new TooManyRequestsException(RESET_MESSAGE, passwordResetsPerEmail.secondsUntilReset(mailKey));
+		}
+	}
+
+	private static final String RESET_MESSAGE = "Zu viele Anfragen zum Zurücksetzen. Bitte später erneut versuchen.";
 
 	/** Zählt einen Schreibzugriff (Anlegen/Ändern/Löschen) eines angemeldeten Users; gegen Spam und DB-Aufblähung. */
 	public void checkWrite(String username) {

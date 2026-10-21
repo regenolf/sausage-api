@@ -51,10 +51,14 @@ class ModerationController {
 	public record ReportReceipt(long id, Status status, Instant createdAt) {
 	}
 
-	/** Meldung samt aktuellem Inhalt; {@code author}/{@code contentPreview} sind null, wenn der Inhalt gelöscht ist. */
+	/**
+	 * Meldung samt Inhalt: aktuell, oder – wenn der Inhalt gelöscht ist ({@code contentDeleted}) – der beim Melden
+	 * gesicherte Stand. Bei Meldungen von vor dieser Sicherung sind {@code author}/{@code contentPreview} dann null.
+	 */
 	public record ReportView(long id, TargetType targetType, long targetId, Reason reason, String message,
 			String reporter, String reporterEmail, Status status, String decisionNote, String decidedBy,
-			Instant decidedAt, Instant createdAt, Long spotId, String author, String contentPreview) {
+			Instant decidedAt, Instant createdAt, Long spotId, String author, String contentPreview,
+			boolean contentDeleted) {
 	}
 
 	/** Eigene Meldung aus Sicht des Melders (ohne Angaben zu anderen Personen). */
@@ -71,11 +75,14 @@ class ModerationController {
 	private final ReportRepository reports;
 	private final UserRepository users;
 	private final LoginThrottle throttle;
+	private final ModerationNotifier notifier;
 
-	ModerationController(ReportRepository reports, UserRepository users, LoginThrottle throttle) {
+	ModerationController(ReportRepository reports, UserRepository users, LoginThrottle throttle,
+			ModerationNotifier notifier) {
 		this.reports = reports;
 		this.users = users;
 		this.throttle = throttle;
+		this.notifier = notifier;
 	}
 
 	@PostMapping("/reports")
@@ -91,11 +98,11 @@ class ModerationController {
 					"Bitte eine E-Mail-Adresse angeben oder anmelden, damit wir dich über die Entscheidung informieren können");
 		}
 		throttle.checkReport(http.getRemoteAddr());
-		if (reports.findTarget(request.targetType(), request.targetId()).isEmpty()) {
-			throw new ResponseStatusException(HttpStatus.NOT_FOUND, "Der gemeldete Inhalt existiert nicht (mehr)");
-		}
+		Target target = reports.findTarget(request.targetType(), request.targetId())
+				.orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "Der gemeldete Inhalt existiert nicht (mehr)"));
+		// Stand des Inhalts sichern: bleibt für Entscheidung und Begründung erhalten, auch wenn er entfernt wird
 		long id = reports.create(request.targetType(), request.targetId(), request.reason(),
-				blankToNull(request.message()), reporterId, email);
+				blankToNull(request.message()), reporterId, email, target);
 		StoredReport stored = reports.find(id).orElseThrow();
 		return ResponseEntity.created(URI.create("/api/reports/" + id))
 				.body(new ReportReceipt(id, stored.status(), stored.createdAt()));
@@ -127,6 +134,17 @@ class ModerationController {
 		}
 		long adminId = currentUserId(auth);
 		String note = blankToNull(request.note());
+		// Vorher erfassen, wen die Entscheidung betrifft (Melder und Verfasser werden benachrichtigt)
+		List<StoredReport> affected = new java.util.ArrayList<>();
+		if (request.decision() == Status.REMOVED) {
+			affected.addAll(reports.findOpenForTarget(report.targetType(), report.targetId()));
+			if (report.targetType() == TargetType.SPOT) {
+				affected.addAll(reports.findOpenForSpotContent(report.targetId()));
+			}
+		}
+		else {
+			affected.add(report);
+		}
 		switch (request.decision()) {
 			case REMOVED -> {
 				if (report.targetType() == TargetType.SPOT) {
@@ -140,6 +158,7 @@ class ModerationController {
 			case OPEN -> throw new ResponseStatusException(HttpStatus.BAD_REQUEST,
 					"Entscheidung muss REMOVED oder REJECTED sein");
 		}
+		notifier.decided(affected, request.decision(), note);
 		return view(reports.find(id).orElseThrow());
 	}
 
@@ -173,12 +192,20 @@ class ModerationController {
 		return ResponseEntity.noContent().build();
 	}
 
+	/** Entfernte Inhalte der angemeldeten Person mit Begründung (DSA Art. 17). */
+	@GetMapping("/users/me/moderation-decisions")
+	List<ReportRepository.Decision> myModerationDecisions(Authentication auth) {
+		return reports.findRemovedForAuthor(currentUserId(auth));
+	}
+
+	/** Aktueller Inhalt, sonst der beim Melden gesicherte Stand ({@code contentDeleted}). */
 	private ReportView view(StoredReport r) {
 		Target target = reports.findTarget(r.targetType(), r.targetId()).orElse(null);
+		boolean deleted = target == null;
 		return new ReportView(r.id(), r.targetType(), r.targetId(), r.reason(), r.message(), r.reporter(),
 				r.reporterEmail(), r.status(), r.decisionNote(), r.decidedBy(), r.decidedAt(), r.createdAt(),
-				target == null ? null : target.spotId(), target == null ? null : target.author(),
-				target == null ? null : target.preview());
+				deleted ? r.snapshotSpotId() : target.spotId(), deleted ? r.snapshotAuthor() : target.author(),
+				deleted ? r.contentSnapshot() : target.preview(), deleted);
 	}
 
 	private long currentUserId(Authentication auth) {

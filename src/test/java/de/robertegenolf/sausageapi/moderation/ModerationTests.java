@@ -2,6 +2,7 @@ package de.robertegenolf.sausageapi.moderation;
 
 import com.jayway.jsonpath.JsonPath;
 import de.robertegenolf.sausageapi.TestcontainersConfiguration;
+import de.robertegenolf.sausageapi.mail.Mailer;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
@@ -9,10 +10,13 @@ import org.springframework.boot.webmvc.test.autoconfigure.AutoConfigureMockMvc;
 import org.springframework.context.annotation.Import;
 import org.springframework.http.MediaType;
 import org.springframework.jdbc.core.simple.JdbcClient;
+import org.springframework.test.context.bean.override.mockito.MockitoBean;
 import org.springframework.test.web.servlet.MockMvc;
 
 import java.util.UUID;
 
+import static org.mockito.ArgumentMatchers.eq;
+import static org.mockito.Mockito.verify;
 import static org.springframework.security.test.web.servlet.request.SecurityMockMvcRequestPostProcessors.httpBasic;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
@@ -35,6 +39,9 @@ class ModerationTests {
 
 	@Autowired
 	private JdbcClient jdbc;
+
+	@MockitoBean
+	private Mailer mailer;
 
 	@Test
 	void meldenMitUndOhneAnmeldung() throws Exception {
@@ -105,7 +112,9 @@ class ModerationTests {
 				.andExpect(status().isOk())
 				.andExpect(jsonPath("$.status").value("REMOVED"))
 				.andExpect(jsonPath("$.decidedBy").value(admin))
-				.andExpect(jsonPath("$.contentPreview").doesNotExist());
+				// gelöscht, aber der beim Melden gesicherte Stand bleibt nachvollziehbar
+				.andExpect(jsonPath("$.contentDeleted").value(true))
+				.andExpect(jsonPath("$.contentPreview").value("Beleidigung " + author));
 		mvc.perform(get("/api/spots/" + spotId + "/comments")).andExpect(jsonPath("$").isEmpty());
 		mvc.perform(get("/api/admin/reports").param("status", "ALL").with(httpBasic(admin, PASSWORD)))
 				.andExpect(jsonPath("$[?(@.id == " + second + ")].status").value("REMOVED"));
@@ -157,6 +166,46 @@ class ModerationTests {
 		mvc.perform(put("/api/admin/reports/" + commentReport).with(httpBasic(admin, PASSWORD))
 						.contentType(MediaType.APPLICATION_JSON).content("{\"decision\":\"REJECTED\"}"))
 				.andExpect(status().isConflict());
+	}
+
+	@Test
+	void entfernterInhaltBleibtNachvollziehbarUndBeideSeitenWerdenInformiert() throws Exception {
+		String author = register();
+		String reporter = register();
+		String admin = register();
+		jdbc.sql("UPDATE app_user SET role = 'ADMIN' WHERE username = :u").param("u", admin).update();
+		long spotId = createSpot(author);
+		String location = mvc.perform(post("/api/spots/" + spotId + "/comments").with(httpBasic(author, PASSWORD))
+						.contentType(MediaType.APPLICATION_JSON).content("{\"text\":\"Gemeiner Kommentar\"}"))
+				.andReturn().getResponse().getHeader("Location");
+		long commentId = Long.parseLong(location.substring(location.lastIndexOf('/') + 1));
+		long reportId = reportId(mvc.perform(post("/api/reports").with(httpBasic(reporter, PASSWORD))
+				.contentType(MediaType.APPLICATION_JSON).content(report("COMMENT", commentId, "INSULT", null)))
+				.andExpect(status().isCreated()).andReturn().getResponse().getContentAsString());
+
+		mvc.perform(put("/api/admin/reports/" + reportId).with(httpBasic(admin, PASSWORD))
+						.contentType(MediaType.APPLICATION_JSON).content("{\"decision\":\"REMOVED\",\"note\":\"Beleidigung\"}"))
+				.andExpect(status().isOk())
+				// Inhalt ist gelöscht, der gesicherte Stand bleibt sichtbar
+				.andExpect(jsonPath("$.contentDeleted").value(true))
+				.andExpect(jsonPath("$.contentPreview").value("Gemeiner Kommentar"))
+				.andExpect(jsonPath("$.author").value(author))
+				.andExpect(jsonPath("$.spotId").value(spotId));
+
+		verify(mailer).send(eq(reporter + "@test.de"), eq("Sausage: Entscheidung zu deiner Meldung"),
+				org.mockito.ArgumentMatchers.contains("entfernt"));
+		verify(mailer).send(eq(author + "@test.de"), eq("Sausage: Ein Inhalt von dir wurde entfernt"),
+				org.mockito.ArgumentMatchers.contains("Begründung: Beleidigung"));
+
+		mvc.perform(get("/api/users/me/moderation-decisions").with(httpBasic(author, PASSWORD)))
+				.andExpect(status().isOk())
+				.andExpect(jsonPath("$[0].targetType").value("COMMENT"))
+				.andExpect(jsonPath("$[0].decisionNote").value("Beleidigung"))
+				.andExpect(jsonPath("$[0].contentSnapshot").value("Gemeiner Kommentar"));
+		mvc.perform(get("/api/users/me/moderation-decisions").with(httpBasic(reporter, PASSWORD)))
+				.andExpect(jsonPath("$.length()").value(0));
+		mvc.perform(get("/api/users/me/export").with(httpBasic(author, PASSWORD)))
+				.andExpect(jsonPath("$.meldungen_zu_eigenen_inhalten[0].inhalt").value("Gemeiner Kommentar"));
 	}
 
 	@Test

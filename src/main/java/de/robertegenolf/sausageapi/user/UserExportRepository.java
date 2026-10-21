@@ -56,6 +56,13 @@ class UserExportRepository {
 				       status, decision_note AS begruendung,
 				       to_char(created_at, 'YYYY-MM-DD"T"HH24:MI:SS') AS erstellt_am
 				FROM report WHERE reporter_id = :id ORDER BY id""", userId));
+		// Gesicherte Inhalte der Person, die gemeldet wurden (inkl. Entscheidung) – ohne Angaben zu den Meldern
+		data.put("meldungen_zu_eigenen_inhalten", rows("""
+				SELECT DISTINCT ON (target_type, target_id) target_type AS art, target_id AS inhalt_id,
+				       reason AS grund, status, decision_note AS begruendung, content_snapshot AS inhalt,
+				       to_char(decided_at, 'YYYY-MM-DD"T"HH24:MI:SS') AS entschieden_am
+				FROM report WHERE target_author_id = :id
+				ORDER BY target_type, target_id, created_at DESC""", userId));
 		data.put("blockierte_nutzer", rows("""
 				SELECT u.username, to_char(b.created_at, 'YYYY-MM-DD"T"HH24:MI:SS') AS blockiert_am
 				FROM user_block b JOIN app_user u ON u.id = b.blocked_id

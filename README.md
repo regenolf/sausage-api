@@ -119,7 +119,7 @@ Listen (`/api/spots`, `/api/spots/nearby`, `/api/users/me/spots`) enthalten `cov
 | `DELETE` | `/api/spots/{id}/ratings/me` | Eigene Bewertung zurücknehmen 🔒 |
 | `GET` | `/api/spots/{id}/photos` | Fotos eines Spots (Metadaten mit `url`) |
 | `GET` | `/api/spots/{id}/photos/{photoId}` | Das Bild selbst |
-| `POST` | `/api/spots/{id}/photos` | Foto hochladen (multipart, Feld `file`, JPEG/PNG/WebP, max. 10 MB, 40 Megapixel und 20 je Spot; EXIF/GPS-Metadaten werden entfernt) 🔒 |
+| `POST` | `/api/spots/{id}/photos` | Foto hochladen (multipart, Feld `file`, JPEG/PNG/WebP, max. 10 MB, 40 Megapixel und 20 je Spot; EXIF/GPS-Metadaten und angehängte Daten werden entfernt; Tageskontingent 50 MB je Nutzer, `PHOTO_DAILY_QUOTA_BYTES`, sonst 429; Admins ausgenommen) 🔒 |
 | `DELETE` | `/api/spots/{id}/photos/{photoId}` | Foto löschen 🔒 (Hochladender, Ersteller des Spots oder Admin) |
 | `GET` | `/api/spots/{id}/comments` | Kommentare (neueste zuerst, mit Benutzername) |
 | `POST` | `/api/spots/{id}/comments` | Kommentieren 🔒 |
@@ -127,6 +127,32 @@ Listen (`/api/spots`, `/api/spots/nearby`, `/api/users/me/spots`) enthalten `cov
 
 Fehler kommen als [Problem Details](https://www.rfc-editor.org/rfc/rfc9457) (`application/problem+json`) mit
 deutscher Meldung in `detail`; bei Validierungsfehlern stehen die betroffenen Felder in `errors`.
+
+### Passwort vergessen
+
+| Methode | Pfad | Beschreibung |
+|---|---|---|
+| `POST` | `/api/auth/password-reset` | `{"email":"…"}` → immer 204; ist die Adresse registriert, kommt ein Link `…/reset-password?token=…` (60 Minuten gültig, einmal verwendbar, gespeichert nur als SHA-256-Hash). Limit pro IP und pro Adresse |
+| `POST` | `/api/auth/password-reset/confirm` | `{"token":"…","newPassword":"…"}` → 204, alle bisherigen Anmeldungen werden ungültig; 400 bei ungültigem/abgelaufenem Link |
+
+E-Mails gehen per SMTP raus (`SPRING_MAIL_HOST`, `_PORT`, `_USERNAME`, `_PASSWORD`, Absender `MAIL_FROM`); ohne
+`SPRING_MAIL_HOST` werden sie nur ins Log geschrieben. Links zeigen auf `FRONTEND_URL` bzw. `PUBLIC_URL`.
+
+### Datenschutz ohne Anmeldung (gesperrte Konten)
+
+| Methode | Pfad | Beschreibung |
+|---|---|---|
+| `POST` | `/api/auth/data/export` | `{"login":"…","password":"…"}` → alle eigenen Daten als JSON-Datei, auch für gesperrte Konten (Art. 15/20 DSGVO); gedrosselt wie der Login |
+| `POST` | `/api/auth/data/delete` | `{"login":"…","password":"…"}` → 204, Konto gelöscht (Art. 17 DSGVO) |
+
+### Suchmaschinen und Link-Vorschauen
+
+| Methode | Pfad | Beschreibung |
+|---|---|---|
+| `GET` | `/api/seo/spots/{id}` | HTML mit Titel, Beschreibung, Open-Graph-Bild (erstes Foto) und schema.org-`FoodEstablishment` (Adresse, Geo, Bewertung). nginx im Frontend leitet Crawler und Vorschau-Dienste (WhatsApp, Telegram, Facebook, Google …) von `/spots/{id}` hierher |
+| `GET` | `/api/seo/sitemap.xml` | Sitemap aller Spots, im Frontend unter `/sitemap.xml` |
+
+Absolute Adressen kommen aus `PUBLIC_URL` oder aus `X-Forwarded-Proto`/`Host`.
 
 ### Melden und Moderation (Art. 16 DSA)
 
@@ -140,7 +166,13 @@ deutscher Meldung in `detail`; bei Validierungsfehlern stehen die betroffenen Fe
 | `PUT` | `/api/admin/users/{username}/status` | Account sperren/entsperren `{"enabled":false}`; Tokens werden sofort ungültig 🔒 Admin |
 
 Admins dürfen außerdem fremde Spots bearbeiten und löschen sowie Bewertungen, Kommentare und Fotos löschen.
-Noch offen: Benachrichtigung von Meldern und Betroffenen per E-Mail (braucht Mailversand).
+| `GET` | `/api/users/me/moderation-decisions` | Entfernte eigene Inhalte mit Grund, Begründung und gesichertem Auszug (DSA Art. 17) 🔒 |
+
+Beim Melden werden Verfasser und Inhalt gesichert (`content_snapshot`), damit Entscheidung und Begründung auch nach dem
+Entfernen nachvollziehbar bleiben; die Admin-Ansicht zeigt dann den gesicherten Stand (`contentDeleted: true`).
+Nach einer Entscheidung bekommen Melder eine Mail mit dem Ergebnis, bei REMOVED auch die Verfasser (mit Begründung und
+Hinweis auf Widerspruch per Antwort-Mail). Im Datenexport stehen die eigenen gemeldeten Inhalte unter
+`meldungen_zu_eigenen_inhalten`.
 
 ### Admins
 
