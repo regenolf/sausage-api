@@ -128,6 +128,15 @@ Listen (`/api/spots`, `/api/spots/nearby`, `/api/users/me/spots`) enthalten `cov
 Fehler kommen als [Problem Details](https://www.rfc-editor.org/rfc/rfc9457) (`application/problem+json`) mit
 deutscher Meldung in `detail`; bei Validierungsfehlern stehen die betroffenen Felder in `errors`.
 
+### Suchmaschinen und Link-Vorschauen
+
+| Methode | Pfad | Beschreibung |
+|---|---|---|
+| `GET` | `/api/seo/spots/{id}` | HTML mit Titel, Beschreibung, Open-Graph-Bild (erstes Foto) und schema.org-`FoodEstablishment` (Adresse, Geo, Bewertung). nginx im Frontend leitet Crawler und Vorschau-Dienste (WhatsApp, Telegram, Facebook, Google …) von `/spots/{id}` hierher |
+| `GET` | `/api/seo/sitemap.xml` | Sitemap aller Spots, im Frontend unter `/sitemap.xml` |
+
+Absolute Adressen kommen aus `PUBLIC_URL` oder aus `X-Forwarded-Proto`/`Host`.
+
 ### Melden und Moderation (Art. 16 DSA)
 
 | Methode | Pfad | Beschreibung |

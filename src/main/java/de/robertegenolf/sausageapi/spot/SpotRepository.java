@@ -219,6 +219,16 @@ class SpotRepository {
 		}
 	}
 
+	record SitemapEntry(long id, java.time.Instant updatedAt) {
+	}
+
+	/** Alle Spots für die Sitemap, zuletzt geänderte zuerst (Sitemaps erlauben bis 50.000 Einträge). */
+	List<SitemapEntry> findSitemapEntries() {
+		return jdbc.sql("SELECT id, updated_at FROM spot ORDER BY updated_at DESC, id LIMIT 50000")
+				.query((rs, n) -> new SitemapEntry(rs.getLong("id"), rs.getTimestamp("updated_at").toInstant()))
+				.list();
+	}
+
 	Optional<SpotDetail> findSpot(long id) {
 		String sql = SPOT_SELECT + "WHERE s.id = :id\n" + SPOT_GROUP_BY;
 		return jdbc.sql(sql)
