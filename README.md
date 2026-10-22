@@ -26,22 +26,78 @@ docker compose --profile app up --build   # API auf http://localhost:8080
 
 `deploy/docker-compose.prod.yml` startet alles zusammen auf einem Server: Caddy (HTTPS mit automatischem
 Let's-Encrypt-Zertifikat) → nginx der App (`regenolf/sausage-app`, liefert die Web-App aus und leitet `/api` weiter) → API
-→ Postgres, dazu ein tägliches `pg_dump` nach `deploy/backups/`. API, Datenbank, Actuator und Swagger sind von außen
+→ Postgres, dazu ein tägliches `pg_dump` nach `backups/`. API, Datenbank, Actuator und Swagger sind von außen
 nicht erreichbar, nur `https://DOMAIN` und `https://DOMAIN/api/…`.
 
-```bash
-git clone https://github.com/regenolf/sausage-api && git clone https://github.com/regenolf/sausage-app
-cd sausage-api/deploy
-cp .env.example .env        # DOMAIN, DB_PASSWORD, JWT_SECRET eintragen
-docker compose -f docker-compose.prod.yml up -d --build
+Live unter **https://www.wurst-weiser.de** (KVM-Server bei Hostinger, Domain bei Alfahosting).
+
+#### Pipeline
+
+```
+Push auf main ─ CI grün ─▶ Image nach ghcr.io (Tags main und sha-1a2b3c4) ─▶ per SSH auf den Server:
+                            docker compose pull api && up -d --wait api ─▶ Prüfung https://DOMAIN/api/categories
 ```
 
-Voraussetzungen: DNS von `DOMAIN` zeigt auf den Server, Ports 80 und 443 sind offen.
-Backups zusätzlich außerhalb des Servers sichern (sie enthalten auch alle Fotos). Wiederherstellen:
+sausage-app macht dasselbe für den Dienst `app`. Beide Repos deployen unabhängig voneinander; auf dem Server liegen nur
+`docker-compose.prod.yml`, `Caddyfile` (überträgt die Pipeline bei jedem Deployment) und `.env`.
+
+**Rollback:** auf dem Server in `.env` z. B. `API_TAG=sha-1a2b3c4` setzen und
+`docker compose -f docker-compose.prod.yml up -d api`. Die Tags stehen unter *Packages* im GitHub-Repo.
+
+#### Einrichtung (einmalig)
+
+1. **DNS bei Alfahosting:** A-Records für `www` und `@` (die Domain ohne www) auf die IPv4 des Servers, bei IPv6
+   zusätzlich AAAA-Records. MX-Einträge (E-Mail) bleiben unverändert. Prüfen: `dig +short www.wurst-weiser.de`.
+2. **Server (Ubuntu 24.04)** als root:
+
+   ```bash
+   curl -fsSL https://get.docker.com | sh
+   adduser --disabled-password --gecos "" deploy && usermod -aG docker deploy
+   install -d -o deploy -g deploy /opt/sausage
+   ufw allow OpenSSH && ufw allow 80/tcp && ufw allow 443 && ufw enable
+   ```
+
+   Danach den **öffentlichen** Pipeline-Schlüssel in `/home/deploy/.ssh/authorized_keys` eintragen und in
+   `/etc/ssh/sshd_config` `PasswordAuthentication no` sowie `PermitRootLogin prohibit-password` setzen
+   (vorher den eigenen Schlüssel hinterlegen!). In der Hostinger-Firewall ebenfalls nur 22, 80 und 443 freigeben.
+3. **Schlüssel für die Pipeline** (lokal): `ssh-keygen -t ed25519 -f sausage-deploy -N "" -C github-actions`.
+4. **`.env` auf dem Server** (`/opt/sausage/.env`, nur dort, nie in Git) nach `deploy/.env.example` anlegen:
+   `DOMAIN=www.wurst-weiser.de`, `REDIRECT_DOMAINS=wurst-weiser.de`, `DB_PASSWORD` und `JWT_SECRET` jeweils mit
+   `openssl rand -base64 48` erzeugen. Rechte: `chmod 600 .env`.
+5. **GitHub, in beiden Repos** unter *Settings → Environments → production* die Secrets anlegen:
+
+   | Secret | Wert |
+   |---|---|
+   | `SSH_HOST` | IP des Servers |
+   | `SSH_USER` | `deploy` |
+   | `SSH_PRIVATE_KEY` | Inhalt von `sausage-deploy` (privater Schlüssel) |
+   | `SSH_KNOWN_HOSTS` | Ausgabe von `ssh-keyscan <IP>` |
+
+   Optional unter *Required reviewers* sich selbst eintragen: Dann wartet jedes Deployment auf eine Freigabe.
+   Unter *Settings → Secrets and variables → Actions → Variables* `DEPLOY_ENABLED=true` setzen – erst dann laufen
+   die Deploy-Jobs. Unter *Settings → Branches* für `main` „Require status checks to pass“ aktivieren.
+6. **Erster Start:** Sobald beide Pipelines je einmal gelaufen sind (Images liegen in ghcr.io), auf dem Server einmal
+   alles starten – danach erledigt die Pipeline Updates:
+
+   ```bash
+   cd /opt/sausage
+   echo <GitHub-Token mit read:packages> | docker login ghcr.io -u regenolf --password-stdin
+   docker compose -f docker-compose.prod.yml up -d && docker logout ghcr.io
+   ```
+
+   Alternativ die Packages unter *Package settings* auf „Public“ stellen (der Code bleibt privat).
+7. **Ersten Admin anlegen:** registrieren und dann
+   `docker compose -f docker-compose.prod.yml exec db psql -U sausage -c "UPDATE app_user SET role='ADMIN' WHERE username='<name>'"`.
+
+**Backups** liegen in `/opt/sausage/backups` – zusätzlich außerhalb des Servers sichern (sie enthalten auch alle Fotos),
+z. B. per `rclone` oder den Snapshots von Hostinger. Wiederherstellen:
 
 ```bash
 docker compose -f docker-compose.prod.yml exec -T db pg_restore -U sausage -d sausage --clean < backups/sausage-JJJJ-MM-TT_HHMM.dump
 ```
+
+Ohne Registry direkt aus den Quellen (sausage-app neben sausage-api ausgecheckt):
+`docker compose -f docker-compose.prod.yml -f docker-compose.build.yml up -d --build`.
 
 ### Konfiguration (Umgebungsvariablen)
 

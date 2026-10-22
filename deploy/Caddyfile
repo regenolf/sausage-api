@@ -7,3 +7,8 @@
 	}
 	reverse_proxy app:80
 }
+
+# Weitere Namen (z. B. die Domain ohne www) leiten dauerhaft auf $DOMAIN um, ebenfalls mit Zertifikat.
+{$REDIRECT_DOMAINS} {
+	redir https://{$DOMAIN}{uri} permanent
+}
