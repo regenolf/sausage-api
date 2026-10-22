@@ -36,6 +36,28 @@ class ImageMetadataStripperTests {
 	}
 
 	@Test
+	void jpegVerliertAngehaengteDatenUndMpf() throws Exception {
+		byte[] jpeg = image("jpg");
+		// Motion Photo / MPO: hinter dem Dateiende hängt ein zweites Bild (bzw. Video) mit eigenem EXIF
+		byte[] trailer = insertAfterSoi(image("jpg"), exifSegment(1, SECRET));
+		byte[] mpfPayload = ("MPF\0" + SECRET).getBytes(StandardCharsets.ISO_8859_1);
+		byte[] mpf = ByteBuffer.allocate(4 + mpfPayload.length).put((byte) 0xFF).put((byte) 0xE2)
+				.putShort((short) (2 + mpfPayload.length)).put(mpfPayload).array();
+		byte[] withMpf = insertAfterSoi(jpeg, mpf);
+		byte[] combined = ByteBuffer.allocate(withMpf.length + trailer.length).put(withMpf).put(trailer).array();
+		assertThat(contains(combined, SECRET)).isTrue();
+
+		byte[] stripped = ImageMetadataStripper.strip(combined, "image/jpeg");
+
+		assertThat(contains(stripped, SECRET)).isFalse();
+		assertThat(contains(stripped, "MPF")).isFalse();
+		assertThat(stripped.length).isLessThan(jpeg.length + 1);
+		assertThat(stripped[stripped.length - 2] & 0xFF).isEqualTo(0xFF);
+		assertThat(stripped[stripped.length - 1] & 0xFF).isEqualTo(0xD9);
+		assertThat(ImageIO.read(new ByteArrayInputStream(stripped))).isNotNull();
+	}
+
+	@Test
 	void jpegOhneDrehungBekommtKeinExif() throws Exception {
 		byte[] stripped = ImageMetadataStripper.strip(insertAfterSoi(image("jpg"), exifSegment(1, SECRET)),
 				"image/jpeg");

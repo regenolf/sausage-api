@@ -54,6 +54,7 @@ public class TokenService {
 				.claim("name", user.username())
 				.claim(JwtConfig.ROLES_CLAIM, List.of(user.role()))
 				.claim(UserJwtAuthenticationConverter.VERSION_CLAIM, user.tokenVersion())
+				.claim(UserJwtAuthenticationConverter.USER_ID_CLAIM, user.id())
 				.build();
 		String token = encoder.encode(JwtEncoderParameters.from(JwsHeader.with(MacAlgorithm.HS256).build(), claims))
 				.getTokenValue();

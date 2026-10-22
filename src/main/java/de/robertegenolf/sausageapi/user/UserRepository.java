@@ -9,7 +9,9 @@ import java.util.Optional;
 @Repository
 public class UserRepository {
 
-	public record StoredUser(long id, String username, String passwordHash, String role, int tokenVersion) {
+	/** {@code createdAt}: Zeitpunkt der Registrierung – ältere Tokens können nicht zu diesem Account gehören. */
+	public record StoredUser(long id, String username, String passwordHash, String role, int tokenVersion,
+			Instant createdAt) {
 	}
 
 	/**
@@ -19,6 +21,13 @@ public class UserRepository {
 	public record UserProfile(long id, String username, String email, String role, Instant createdAt,
 			String termsVersion, Instant termsAcceptedAt, String currentTermsVersion) {
 	}
+
+	/** Account aus Sicht der Moderation (ohne Passwort-Hash). */
+	public record AdminUser(String username, String email, String role, boolean enabled, Instant createdAt) {
+	}
+
+	/** Höchstzahl der Treffer in der Admin-Suche – für mehr den Suchbegriff verfeinern. */
+	public static final int ADMIN_SEARCH_LIMIT = 100;
 
 	/**
 	 * Erlaubt sind Buchstaben, Ziffern, Leerzeichen, Punkt, Unterstrich und Bindestrich; Anfang und Ende müssen
@@ -39,6 +48,16 @@ public class UserRepository {
 		return java.text.Normalizer.normalize(username.trim(), java.text.Normalizer.Form.NFKC);
 	}
 
+	private static final java.util.regex.Pattern USERNAME_REGEX = java.util.regex.Pattern.compile(USERNAME_PATTERN);
+
+	/**
+	 * Prüft den bereits normalisierten Namen erneut: NFKC kann Zeichen vervielfachen (z. B. U+FDFA → 18 Zeichen)
+	 * oder in nicht erlaubte umwandeln (½ → 1⁄2), die Bean-Validation sieht aber nur die Eingabe.
+	 */
+	public static boolean isValidNormalizedUsername(String username) {
+		return username.length() >= 3 && username.length() <= 50 && USERNAME_REGEX.matcher(username).matches();
+	}
+
 	/** Namen, die nach Betreiber oder Moderation aussehen (Groß-/Kleinschreibung und Trennzeichen egal). */
 	public static boolean isReservedUsername(String username) {
 		return RESERVED_USERNAMES.contains(username.toLowerCase(java.util.Locale.ROOT).replaceAll("[ ._-]", ""));
@@ -51,10 +70,11 @@ public class UserRepository {
 	}
 
 	public Optional<StoredUser> findByUsername(String username) {
-		return jdbc.sql("SELECT id, username, password_hash, role, token_version FROM app_user WHERE username = :username AND enabled")
+		return jdbc.sql("SELECT id, username, password_hash, role, token_version, created_at FROM app_user WHERE username = :username AND enabled")
 				.param("username", username)
 				.query((rs, n) -> new StoredUser(rs.getLong("id"), rs.getString("username"),
-						rs.getString("password_hash"), rs.getString("role"), rs.getInt("token_version")))
+						rs.getString("password_hash"), rs.getString("role"), rs.getInt("token_version"),
+						rs.getTimestamp("created_at").toInstant()))
 				.optional();
 	}
 
@@ -63,14 +83,20 @@ public class UserRepository {
 	 * Da Benutzernamen kein "@" enthalten dürfen, kann ein fremder Account den E-Mail-Login nicht überdecken.
 	 */
 	public Optional<StoredUser> findByLogin(String login) {
+		return findByLogin(login, false);
+	}
+
+	/** Wie {@link #findByLogin(String)}, auf Wunsch auch gesperrte Accounts (nur für DSGVO-Export und -Löschung). */
+	Optional<StoredUser> findByLogin(String login, boolean includeDisabled) {
 		String where = login.contains("@") ? "lower(email) = lower(:login)" : "username = :login";
 		return jdbc.sql("""
-				SELECT id, username, password_hash, role, token_version FROM app_user
-				WHERE %s AND enabled
-				""".formatted(where))
+				SELECT id, username, password_hash, role, token_version, created_at FROM app_user
+				WHERE %s%s
+				""".formatted(where, includeDisabled ? "" : " AND enabled"))
 				.param("login", login)
 				.query((rs, n) -> new StoredUser(rs.getLong("id"), rs.getString("username"),
-						rs.getString("password_hash"), rs.getString("role"), rs.getInt("token_version")))
+						rs.getString("password_hash"), rs.getString("role"), rs.getInt("token_version"),
+						rs.getTimestamp("created_at").toInstant()))
 				.optional();
 	}
 
@@ -118,6 +144,35 @@ public class UserRepository {
 				.param("enabled", enabled)
 				.param("username", username)
 				.update() > 0;
+	}
+
+	/**
+	 * Accounts für die Moderation, alphabetisch; {@code enabled} null = alle, {@code query} sucht (ohne
+	 * Groß-/Kleinschreibung) in Benutzername und E-Mail.
+	 */
+	public java.util.List<AdminUser> findForAdmin(Boolean enabled, String query) {
+		String pattern = query == null || query.isBlank() ? null
+				: "%" + query.trim().toLowerCase(java.util.Locale.ROOT).replace("\\", "\\\\").replace("%", "\\%")
+						.replace("_", "\\_") + "%";
+		return jdbc.sql("""
+				SELECT username, email, role, enabled, created_at FROM app_user
+				WHERE (CAST(:enabled AS boolean) IS NULL OR enabled = CAST(:enabled AS boolean))
+				  AND (CAST(:pattern AS varchar) IS NULL OR LOWER(username) LIKE CAST(:pattern AS varchar)
+				       OR LOWER(email) LIKE CAST(:pattern AS varchar))
+				ORDER BY LOWER(username)
+				LIMIT :limit
+				""")
+				.param("enabled", enabled)
+				.param("pattern", pattern)
+				.param("limit", ADMIN_SEARCH_LIMIT)
+				.query((rs, n) -> new AdminUser(rs.getString("username"), rs.getString("email"), rs.getString("role"),
+						rs.getBoolean("enabled"), rs.getTimestamp("created_at").toInstant()))
+				.list();
+	}
+
+	/** E-Mail eines Kontos, z. B. für Benachrichtigungen der Moderation (auch gesperrte Konten). */
+	public Optional<String> findEmailById(long id) {
+		return jdbc.sql("SELECT email FROM app_user WHERE id = :id").param("id", id).query(String.class).optional();
 	}
 
 	void delete(long id) {

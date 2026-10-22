@@ -180,9 +180,9 @@ final class ImageMetadataStripper {
 					orientation = readExifOrientation(d, pos + 4, segmentEnd);
 				}
 			}
-			else if (marker >= 0xE3 && marker <= 0xEF || marker == 0xFE) {
-				// APP3..APP15 (u. a. IPTC/Photoshop in APP13) und Kommentare -> verwerfen;
-				// APP0 (JFIF) und APP2 (ICC-Farbprofil) bleiben erhalten
+			else if (marker >= 0xE3 && marker <= 0xEF || marker == 0xFE || marker == 0xE2 && isMpf(d, pos + 4, segmentEnd)) {
+				// APP3..APP15 (u. a. IPTC/Photoshop in APP13), Kommentare und MPF (Verweise auf angehängte Zweitbilder)
+				// -> verwerfen; APP0 (JFIF) und APP2 mit ICC-Farbprofil bleiben erhalten
 			}
 			else {
 				if (!orientationWritten && marker != 0xE0 && orientation != null && orientation != 1) {
@@ -190,13 +190,30 @@ final class ImageMetadataStripper {
 					orientationWritten = true;
 				}
 				out.write(d, pos, segmentEnd - pos);
-				if (marker == 0xDA) { // Start of Scan: Rest sind Bilddaten
-					out.write(d, segmentEnd, d.length - segmentEnd);
+				if (marker == 0xDA) { // Start of Scan: Bilddaten bis zum Dateiende-Marker
+					// Danach können Zweitbilder (MPF/MPO, Gain-Maps) oder Videos von Motion Photos mit eigenen
+					// EXIF/GPS-Daten hängen – die werden verworfen. In den Bilddaten ist jedes 0xFF maskiert
+					// (0xFF00) oder ein Marker, 0xFFD9 ist also immer das echte Ende.
+					int end = indexOfEoi(d, segmentEnd);
+					out.write(d, segmentEnd, (end < 0 ? d.length : end + 2) - segmentEnd);
 					return out.toByteArray();
 				}
 			}
 			pos = segmentEnd;
 		}
+	}
+
+	private static int indexOfEoi(byte[] d, int from) {
+		for (int i = from; i + 1 < d.length; i++) {
+			if ((d[i] & 0xFF) == 0xFF && (d[i + 1] & 0xFF) == 0xD9) {
+				return i;
+			}
+		}
+		return -1;
+	}
+
+	private static boolean isMpf(byte[] d, int start, int end) {
+		return end - start >= 4 && d[start] == 'M' && d[start + 1] == 'P' && d[start + 2] == 'F' && d[start + 3] == 0;
 	}
 
 	/** Liest Tag 0x0112 (Orientation) aus IFD0 eines EXIF-APP1-Segments, sonst null. */

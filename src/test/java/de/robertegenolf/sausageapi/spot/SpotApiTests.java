@@ -1004,6 +1004,107 @@ class SpotApiTests {
 				.andExpect(jsonPath("$.detail").value(org.hamcrest.Matchers.containsString("zu groß")));
 	}
 
+	@Test
+	void listenZeigenErstesFotoAlsVorschaubild() throws Exception {
+		String owner = newName();
+		String viewer = newName();
+		register(owner);
+		register(viewer);
+		String name = "Vorschau " + owner;
+		long spotId = createSpot(owner, name, 48.1, 11.5);
+		BufferedImage image = new BufferedImage(4, 4, BufferedImage.TYPE_INT_RGB);
+		ByteArrayOutputStream buffer = new ByteArrayOutputStream();
+		ImageIO.write(image, "png", buffer);
+
+		mvc.perform(get("/api/spots").param("q", name))
+				.andExpect(jsonPath("$[0].coverPhotoUrl").value(org.hamcrest.Matchers.nullValue()));
+		String first = JsonPath.read(mvc.perform(multipart("/api/spots/" + spotId + "/photos").with(httpBasic(owner, PASSWORD))
+						.file(new MockMultipartFile("file", "a.png", "image/png", buffer.toByteArray())))
+				.andExpect(status().isCreated()).andReturn().getResponse().getContentAsString(), "$.url");
+		mvc.perform(multipart("/api/spots/" + spotId + "/photos").with(httpBasic(owner, PASSWORD))
+						.file(new MockMultipartFile("file", "b.png", "image/png", buffer.toByteArray())))
+				.andExpect(status().isCreated());
+
+		// Liste, Umkreissuche und eigene Spots liefern dasselbe erste Foto
+		mvc.perform(get("/api/spots").param("q", name))
+				.andExpect(jsonPath("$[0].coverPhotoUrl").value(first))
+				.andExpect(jsonPath("$[0].ratingCount").value(0));
+		mvc.perform(get("/api/spots/nearby").param("latitude", "48.1").param("longitude", "11.5").param("radiusKm", "0.5"))
+				.andExpect(jsonPath("$[?(@.id == " + spotId + ")].coverPhotoUrl").value(first));
+		mvc.perform(get("/api/users/me/spots").with(httpBasic(owner, PASSWORD)))
+				.andExpect(jsonPath("$[0].coverPhotoUrl").value(first));
+
+		// Wer den Fotografen blockiert, bekommt kein Vorschaubild von ihm
+		mvc.perform(post("/api/users/me/blocks").with(httpBasic(viewer, PASSWORD)).contentType(MediaType.APPLICATION_JSON)
+						.content("{\"username\":\"" + owner + "\"}"))
+				.andExpect(status().isNoContent());
+		mvc.perform(get("/api/spots").param("q", name).with(httpBasic(viewer, PASSWORD)))
+				.andExpect(jsonPath("$[0].coverPhotoUrl").value(org.hamcrest.Matchers.nullValue()));
+	}
+
+	@Test
+	void altesTokenGiltNichtFuerNeuesKontoMitGleichemNamen() throws Exception {
+		String name = newName();
+		register(name);
+		String oldToken = token(name);
+		mvc.perform(delete("/api/users/me").with(httpBasic(name, PASSWORD))
+						.contentType(MediaType.APPLICATION_JSON).content("{\"password\":\"" + PASSWORD + "\"}"))
+				.andExpect(status().isNoContent());
+		register(name);
+
+		mvc.perform(get("/api/users/me").header("Authorization", "Bearer " + oldToken))
+				.andExpect(status().isUnauthorized());
+		mvc.perform(get("/api/users/me").header("Authorization", "Bearer " + token(name)))
+				.andExpect(status().isOk());
+	}
+
+	@Test
+	void zuLangePasswoerterUndNormalisierteNamenLiefern400() throws Exception {
+		String name = newName();
+		// 40 Zeichen, aber 80 Byte – mehr als BCrypt verarbeitet
+		mvc.perform(post("/api/users").contentType(MediaType.APPLICATION_JSON).content("""
+						{"username":"%s","email":"%s@test.de","acceptTerms":true,"password":"%s"}
+						""".formatted(name, name, "ä".repeat(40))))
+				.andExpect(status().isBadRequest())
+				.andExpect(jsonPath("$.errors.password").exists());
+		// U+FDFA wird per NFKC zu 18 Zeichen: 3 davon sprengen die 50 Zeichen
+		mvc.perform(post("/api/users").contentType(MediaType.APPLICATION_JSON).content("""
+						{"username":"\uFDFA\uFDFA\uFDFA","email":"%s@test.de","acceptTerms":true,"password":"%s"}
+						""".formatted(name, PASSWORD)))
+				.andExpect(status().isBadRequest());
+		mvc.perform(post("/api/auth/register").contentType(MediaType.APPLICATION_JSON).content("""
+						{"displayName":"\uFDFA\uFDFA\uFDFA","email":"%s@test.de","acceptTerms":true,"password":"%s"}
+						""".formatted(name, PASSWORD)))
+				.andExpect(status().isBadRequest());
+
+		register(name);
+		mvc.perform(put("/api/users/me/password").with(httpBasic(name, PASSWORD)).contentType(MediaType.APPLICATION_JSON)
+						.content("{\"currentPassword\":\"" + PASSWORD + "\",\"newPassword\":\"" + "x".repeat(73) + "\"}"))
+				.andExpect(status().isBadRequest());
+	}
+
+	@Test
+	void adminLoeschtNurBewertungenDesAngegebenenSpots() throws Exception {
+		String author = newName();
+		String admin = newName();
+		register(author);
+		register(admin);
+		jdbc.sql("UPDATE app_user SET role = 'ADMIN' WHERE username = :u").param("u", admin).update();
+		long spotA = createSpot(author, "A " + author);
+		long spotB = createSpot(author, "B " + author);
+		mvc.perform(post("/api/spots/" + spotB + "/ratings").with(httpBasic(author, PASSWORD))
+						.contentType(MediaType.APPLICATION_JSON).content("{\"score\":4}"))
+				.andExpect(status().isOk());
+		int ratingId = JsonPath.read(mvc.perform(get("/api/spots/" + spotB + "/ratings"))
+				.andReturn().getResponse().getContentAsString(), "$[0].id");
+
+		mvc.perform(delete("/api/spots/" + spotA + "/ratings/" + ratingId).with(httpBasic(admin, PASSWORD)))
+				.andExpect(status().isNotFound());
+		mvc.perform(get("/api/spots/" + spotB + "/ratings")).andExpect(jsonPath("$.length()").value(1));
+		mvc.perform(delete("/api/spots/" + spotB + "/ratings/" + ratingId).with(httpBasic(admin, PASSWORD)))
+				.andExpect(status().isOk());
+	}
+
 	private String token(String username) throws Exception {
 		String json = mvc.perform(post("/api/auth/token").with(httpBasic(username, PASSWORD)))
 				.andExpect(status().isOk())

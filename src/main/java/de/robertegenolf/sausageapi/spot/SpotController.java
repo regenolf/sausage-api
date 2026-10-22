@@ -76,11 +76,11 @@ class SpotController {
 	ResponseEntity<List<SpotSummary>> spots(@RequestParam(required = false) String category,
 			@RequestParam(required = false) @Size(max = 150) String q,
 			@RequestParam(defaultValue = "0") @Min(0) int page,
-			@RequestParam(required = false) @Min(1) @Max(100) Integer size) {
+			@RequestParam(required = false) @Min(1) @Max(100) Integer size, Authentication auth) {
 		String search = q == null || q.isBlank() ? null : q.trim();
 		List<SpotSummary> spots = size == null
-				? repository.findSpots(category, search, null, 0)
-				: repository.findSpots(category, search, size, (long) page * size);
+				? repository.findSpots(category, search, null, 0, viewerId(auth))
+				: repository.findSpots(category, search, size, (long) page * size, viewerId(auth));
 		return ResponseEntity.ok()
 				.header("X-Total-Count", String.valueOf(repository.countSpots(category, search)))
 				.body(spots);
@@ -96,8 +96,8 @@ class SpotController {
 			@RequestParam @NotNull @DecimalMin("-90") @DecimalMax("90") Double latitude,
 			@RequestParam @NotNull @DecimalMin("-180") @DecimalMax("180") Double longitude,
 			@RequestParam(defaultValue = "5") @DecimalMin("0.1") @DecimalMax("50") Double radiusKm,
-			@RequestParam(required = false) String category) {
-		return repository.findSpotsNear(latitude, longitude, radiusKm, category);
+			@RequestParam(required = false) String category, Authentication auth) {
+		return repository.findSpotsNear(latitude, longitude, radiusKm, category, viewerId(auth));
 	}
 
 	@GetMapping("/spots/{id}")
@@ -191,7 +191,9 @@ class SpotController {
 	@Transactional
 	@DeleteMapping("/spots/{id}/ratings/{ratingId}")
 	SpotDetail deleteRating(@PathVariable long id, @PathVariable long ratingId, Authentication auth) {
-		if (!isAdmin(auth) && requireRatingAuthor(id, ratingId) != currentUserId(auth)) {
+		// Immer prüfen, dass die Bewertung zu diesem Spot gehört – auch für Admins
+		long authorId = requireRatingAuthor(id, ratingId);
+		if (!isAdmin(auth) && authorId != currentUserId(auth)) {
 			throw new ResponseStatusException(HttpStatus.FORBIDDEN, "Nur eigene Bewertungen dürfen gelöscht werden");
 		}
 		repository.deleteRatingById(ratingId);
