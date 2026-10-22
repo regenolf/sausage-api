@@ -64,6 +64,8 @@ sausage-app macht dasselbe für den Dienst `app`. Beide Repos deployen unabhäng
 4. **`.env` auf dem Server** (`/opt/sausage/.env`, nur dort, nie in Git) nach `deploy/.env.example` anlegen:
    `DOMAIN=www.wurst-weiser.de`, `REDIRECT_DOMAINS=wurst-weiser.de`, `DB_PASSWORD` und `JWT_SECRET` jeweils mit
    `openssl rand -base64 48` erzeugen. Rechte: `chmod 600 .env`.
+   Für Passwort-Links und Moderations-Mails `SMTP_*` und `MAIL_FROM` setzen, z. B. mit einem Postfach
+   `noreply@wurst-weiser.de` bei Alfahosting (SMTP-Server, Port und Zugangsdaten stehen im Kundenmenü beim Postfach).
 5. **GitHub, in beiden Repos** unter *Settings → Environments → production* die Secrets anlegen:
 
    | Secret | Wert |
@@ -162,8 +164,6 @@ sofort ungültig, ebenso ein gesperrter oder gelöschter Account. Rollenänderun
 | `GET` | `/api/spots?category=&q=&page=&size=` | Spots als Liste, Suche in Name/Stadt; mit `size` seitenweise, Gesamtzahl im Header `X-Total-Count` |
 | `GET` | `/api/spots/nearby?latitude=&longitude=&radiusKm=&category=` | Umkreissuche, sortiert nach Entfernung (`distanceKm`) |
 | `GET` | `/api/spots/{id}` | Spot-Details inkl. Durchschnittsbewertung, Ersteller und `photos` |
-
-Listen (`/api/spots`, `/api/spots/nearby`, `/api/users/me/spots`) enthalten `coverPhotoUrl`: das erste Foto als Vorschaubild (ohne Fotos von Nutzern, die man blockiert hat), sonst `null`.
 | `POST` | `/api/spots` | Spot anlegen 🔒 |
 | `PUT` | `/api/spots/{id}` | Spot bearbeiten 🔒 (nur Ersteller) |
 | `DELETE` | `/api/spots/{id}` | Spot inkl. Bewertungen/Kommentaren/Fotos löschen 🔒 (Admin; Ersteller nur, solange keine Beiträge anderer existieren, sonst 409) |
@@ -180,6 +180,8 @@ Listen (`/api/spots`, `/api/spots/nearby`, `/api/users/me/spots`) enthalten `cov
 | `GET` | `/api/spots/{id}/comments` | Kommentare (neueste zuerst, mit Benutzername) |
 | `POST` | `/api/spots/{id}/comments` | Kommentieren 🔒 |
 | `DELETE` | `/api/spots/{id}/comments/{commentId}` | Kommentar löschen 🔒 (Autor oder Admin) |
+
+Listen (`/api/spots`, `/api/spots/nearby`, `/api/users/me/spots`) enthalten `coverPhotoUrl`: das erste Foto als Vorschaubild (ohne Fotos von Nutzern, die man blockiert hat), sonst `null`.
 
 Fehler kommen als [Problem Details](https://www.rfc-editor.org/rfc/rfc9457) (`application/problem+json`) mit
 deutscher Meldung in `detail`; bei Validierungsfehlern stehen die betroffenen Felder in `errors`.
