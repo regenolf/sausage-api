@@ -1,0 +1,7 @@
+# Baut API und App aus den lokalen Quellen statt die Images aus der Registry zu laden:
+#   docker compose -f docker-compose.prod.yml -f docker-compose.build.yml up -d --build
+services:
+  app:
+    build: ${APP_SOURCE:-../../sausage-app}
+  api:
+    build: ..

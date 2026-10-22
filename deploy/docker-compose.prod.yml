@@ -1,10 +1,14 @@
 # Produktions-Setup für Sausage: HTTPS (Caddy) -> App (nginx aus sausage-app) -> API -> Postgres,
 # dazu ein tägliches Datenbank-Backup (enthält auch alle Fotos).
 #
-#   cd deploy && cp .env.example .env   # Werte eintragen
-#   docker compose -f docker-compose.prod.yml up -d --build
+# Die Images baut GitHub Actions und legt sie in der GitHub Container Registry ab (siehe .github/workflows/deploy.yml);
+# auf dem Server liegen nur diese Datei, das Caddyfile und die .env:
 #
-# Erwartet sausage-app neben sausage-api ausgecheckt (sonst APP_SOURCE in .env anpassen).
+#   cp .env.example .env   # Werte eintragen
+#   docker compose -f docker-compose.prod.yml up -d
+#
+# Lokal aus den Quellen bauen (sausage-app neben sausage-api ausgecheckt):
+#   docker compose -f docker-compose.prod.yml -f docker-compose.build.yml up -d --build
 name: sausage
 
 # Container-Logs begrenzen (Standard wäre unbegrenzt) – gilt für alle Dienste
@@ -24,7 +28,9 @@ services:
       - "443:443"
       - "443:443/udp"
     environment:
-      DOMAIN: ${DOMAIN:?DOMAIN in .env setzen, z. B. wurst.example.de}
+      DOMAIN: ${DOMAIN:?DOMAIN in .env setzen, z. B. www.wurst-weiser.de}
+      # Weitere Namen, die per 301 auf DOMAIN umleiten (z. B. die Domain ohne www), kommagetrennt
+      REDIRECT_DOMAINS: ${REDIRECT_DOMAINS:?REDIRECT_DOMAINS in .env setzen, z. B. wurst-weiser.de}
     volumes:
       - ./Caddyfile:/etc/caddy/Caddyfile:ro
       - caddy-data:/data
@@ -34,7 +40,7 @@ services:
 
   app:
     logging: *logging
-    build: ${APP_SOURCE:-../../sausage-app}
+    image: ghcr.io/regenolf/sausage-app:${APP_TAG:-main}
     restart: unless-stopped
     environment:
       BACKEND_URL: http://api:8080
@@ -44,7 +50,7 @@ services:
 
   api:
     logging: *logging
-    build: ..
+    image: ghcr.io/regenolf/sausage-api:${API_TAG:-main}
     restart: unless-stopped
     environment:
       DB_URL: jdbc:postgresql://db:5432/sausage
