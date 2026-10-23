@@ -38,3 +38,4 @@ deploy/backups/
 
 ### macOS ###
 .DS_Store
+sausage-api.code-workspace
