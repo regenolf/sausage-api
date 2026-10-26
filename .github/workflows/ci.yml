@@ -60,7 +60,7 @@ jobs:
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
       - id: meta
-        uses: docker/metadata-action@v5
+        uses: docker/metadata-action@v6
         with:
           images: ghcr.io/regenolf/sausage-api
           # main = neuester Stand, sha-1a2b3c4 für Rollbacks (API_TAG in der .env auf dem Server)
