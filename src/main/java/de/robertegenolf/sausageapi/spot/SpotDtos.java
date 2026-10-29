@@ -28,27 +28,47 @@ public final class SpotDtos {
 			@Size(max = 500) String description) {
 	}
 
-	/** {@code coverPhotoUrl}: erstes Foto (ohne Fotos blockierter Nutzer) als Vorschaubild, null ohne Fotos. */
+	/**
+	 * {@code coverPhotoUrl}: erstes Foto (ohne Fotos blockierter Nutzer) als Vorschaubild, null ohne Fotos.
+	 * {@code source}: USER (in der App angelegt) oder Importquelle wie OSM (dann Quellenangabe anzeigen);
+	 * {@code verified}: false bei importierten Spots, die die Moderation noch nicht geprüft hat.
+	 */
 	public record SpotSummary(long id, String categoryCode, String name, String city,
-			BigDecimal latitude, BigDecimal longitude, Double averageRating, long ratingCount, String coverPhotoUrl) {
+			BigDecimal latitude, BigDecimal longitude, Double averageRating, long ratingCount, String coverPhotoUrl,
+			String source, boolean verified) {
 	}
 
 	public record NearbySpot(long id, String categoryCode, String name, String city,
 			BigDecimal latitude, BigDecimal longitude, Double averageRating, long ratingCount,
-			double distanceKm, String coverPhotoUrl) {
+			double distanceKm, String coverPhotoUrl, String source, boolean verified) {
 	}
 
+	/**
+	 * {@code source}/{@code verified} wie bei {@link SpotSummary}; {@code sourceUrl} verweist bei importierten Spots
+	 * auf den Eintrag in der Quelle (z. B. https://www.openstreetmap.org/node/123), sonst null.
+	 */
 	public record SpotDetail(long id, String categoryCode, String name, String description,
 			String street, String houseNumber, String zipCode, String city,
 			BigDecimal latitude, BigDecimal longitude, String openingHours,
 			Double averageRating, long ratingCount, String createdBy, Instant createdAt, Instant updatedAt,
-			List<SpotPhoto> photos) {
+			String source, boolean verified, String sourceUrl, List<SpotPhoto> photos) {
 
 		SpotDetail withPhotos(List<SpotPhoto> photos) {
 			return new SpotDetail(id, categoryCode, name, description, street, houseNumber, zipCode, city,
 					latitude, longitude, openingHours, averageRating, ratingCount, createdBy, createdAt, updatedAt,
-					photos);
+					source, verified, sourceUrl, photos);
 		}
+	}
+
+	/** Link auf den Eintrag in der Importquelle, null für in der App angelegte Spots. */
+	public static String sourceUrl(String source, String externalId) {
+		if (externalId == null) {
+			return null;
+		}
+		return switch (source) {
+			case "OSM" -> "https://www.openstreetmap.org/" + externalId;
+			default -> null;
+		};
 	}
 
 	public record SpotPhoto(long id, String url, String uploadedBy, String contentType, int sizeBytes,

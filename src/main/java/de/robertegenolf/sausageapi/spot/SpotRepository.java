@@ -28,6 +28,7 @@ class SpotRepository {
 			SELECT s.id, c.code AS category_code, s.name, s.description, s.street, s.house_number,
 			       s.zip_code, s.city, s.latitude, s.longitude, s.opening_hours,
 			       u.username AS created_by, s.created_at, s.updated_at,
+			       s.source, s.verified, s.external_id,
 			       AVG(r.score)::float8 AS average_rating,
 			       COUNT(r.id) AS rating_count
 			FROM spot s
@@ -64,12 +65,14 @@ class SpotRepository {
 	private final RowMapper<SpotSummary> spotSummary = (rs, n) -> new SpotSummary(rs.getLong("id"),
 			rs.getString("category_code"), rs.getString("name"), rs.getString("city"),
 			rs.getBigDecimal("latitude"), rs.getBigDecimal("longitude"),
-			averageRating(rs), rs.getLong("rating_count"), coverPhotoUrl(rs));
+			averageRating(rs), rs.getLong("rating_count"), coverPhotoUrl(rs),
+			rs.getString("source"), rs.getBoolean("verified"));
 
 	private final RowMapper<NearbySpot> nearbySpot = (rs, n) -> new NearbySpot(rs.getLong("id"),
 			rs.getString("category_code"), rs.getString("name"), rs.getString("city"),
 			rs.getBigDecimal("latitude"), rs.getBigDecimal("longitude"),
-			averageRating(rs), rs.getLong("rating_count"), rs.getDouble("distance_km"), coverPhotoUrl(rs));
+			averageRating(rs), rs.getLong("rating_count"), rs.getDouble("distance_km"), coverPhotoUrl(rs),
+			rs.getString("source"), rs.getBoolean("verified"));
 
 	private static final RowMapper<SpotDetail> SPOT_DETAIL = (rs, n) -> new SpotDetail(rs.getLong("id"),
 			rs.getString("category_code"), rs.getString("name"), rs.getString("description"),
@@ -81,6 +84,8 @@ class SpotRepository {
 			rs.getString("created_by"),
 			rs.getTimestamp("created_at").toInstant(),
 			rs.getTimestamp("updated_at").toInstant(),
+			rs.getString("source"), rs.getBoolean("verified"),
+			SpotDtos.sourceUrl(rs.getString("source"), rs.getString("external_id")),
 			List.of());
 
 	private final JdbcClient jdbc;
@@ -258,6 +263,7 @@ class SpotRepository {
 				.single();
 	}
 
+	/** Bearbeiten gilt als Prüfung: importierte Spots sind danach {@code verified} und werden vom Import nicht mehr überschrieben. */
 	void updateSpot(long id, SpotRequest r) {
 		jdbc.sql("""
 				UPDATE spot SET
@@ -265,7 +271,7 @@ class SpotRepository {
 				    name = :name, description = :description, street = :street,
 				    house_number = :houseNumber, zip_code = :zipCode, city = :city,
 				    latitude = :latitude, longitude = :longitude, opening_hours = :openingHours,
-				    updated_at = CURRENT_TIMESTAMP
+				    verified = TRUE, updated_at = CURRENT_TIMESTAMP
 				WHERE id = :id
 				""").params(spotParams(r))
 				.param("id", id)

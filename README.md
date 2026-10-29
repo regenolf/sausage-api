@@ -183,6 +183,11 @@ sofort ungültig, ebenso ein gesperrter oder gelöschter Account. Rollenänderun
 
 Listen (`/api/spots`, `/api/spots/nearby`, `/api/users/me/spots`) enthalten `coverPhotoUrl`: das erste Foto als Vorschaubild (ohne Fotos von Nutzern, die man blockiert hat), sonst `null`.
 
+Listen und Details enthalten außerdem `source` (`USER` = in der App angelegt, `OSM` = aus OpenStreetMap importiert) und
+`verified` (`false` = importiert und von der Moderation noch nicht geprüft). Details liefern bei importierten Spots
+`sourceUrl` (Link auf den Eintrag in der Quelle). Bei `source: OSM` muss die App „© OpenStreetMap-Mitwirkende“ mit Link
+auf https://www.openstreetmap.org/copyright anzeigen (Lizenz ODbL).
+
 Fehler kommen als [Problem Details](https://www.rfc-editor.org/rfc/rfc9457) (`application/problem+json`) mit
 deutscher Meldung in `detail`; bei Validierungsfehlern stehen die betroffenen Felder in `errors`.
 
@@ -231,6 +236,36 @@ Entfernen nachvollziehbar bleiben; die Admin-Ansicht zeigt dann den gesicherten 
 Nach einer Entscheidung bekommen Melder eine Mail mit dem Ergebnis, bei REMOVED auch die Verfasser (mit Begründung und
 Hinweis auf Widerspruch per Antwort-Mail). Im Datenexport stehen die eigenen gemeldeten Inhalte unter
 `meldungen_zu_eigenen_inhalten`.
+
+### Datenimport aus OpenStreetMap
+
+Bratwurstbuden aus OpenStreetMap lassen sich wiederholt importieren. `tools/osm-import/osm-import.sh` lädt den
+Regionsauszug von [Geofabrik](https://download.geofabrik.de/) (Standard Thüringen), filtert ihn mit `osmium` und schickt
+die Kandidaten an die API:
+
+```bash
+brew install osmium-tool jq                                  # bzw. apt install osmium-tool jq
+API_URL=https://www.wurst-weiser.de tools/osm-import/osm-import.sh           # Probelauf, speichert nichts
+API_URL=https://www.wurst-weiser.de tools/osm-import/osm-import.sh --apply   # importieren
+REGION=europe/germany API_URL=… tools/osm-import/osm-import.sh             # ganz Deutschland
+```
+
+Als Bude gilt ein Imbiss, Restaurant, Biergarten oder Food-Court mit `cuisine=sausage|bratwurst|currywurst|hot_dog`,
+passendem `food:*`-Tag oder „Wurst“, „Würstchen“ bzw. „Rostbrat…“ im Namen (`OsmFeatures.java`). Regeln beim Import:
+
+- neue Buden werden **ungeprüft** angelegt (`verified: false`, ohne Ersteller); nur Admins können sie ändern,
+- ungeprüfte Buden übernehmen bei jedem Import den aktuellen Stand aus OSM,
+- **geprüfte** Buden (bestätigt oder von einem Admin bearbeitet) überschreibt der Import nicht mehr,
+- **gelöschte** importierte Buden kommen nicht wieder (Sperrliste `spot_import_rejection`, per Trigger gefüllt),
+- in OSM verschwundene Buden werden nur gezählt (`stale`), nicht gelöscht.
+
+| Methode | Pfad | Beschreibung |
+|---|---|---|
+| `POST` | `/api/admin/imports/osm?category=BRATWURST&dryRun=false` | GeoJSON aus `osmium export --add-unique-id=type_id` importieren; Antwort mit Zählern (`created`, `updated`, `unchanged`, `keptVerified`, `skippedRejected`, `stale`, …) und den Namen neuer Buden (`newSpots`) 🔒 Admin |
+| `GET` | `/api/admin/spots/unverified?source=OSM&limit=200` | Prüfliste: ungeprüfte Spots, älteste zuerst, mit `sourceUrl`; Gesamtzahl im Header `X-Total-Count` 🔒 Admin |
+| `POST` | `/api/admin/spots/{id}/verify` | Spot bestätigen 🔒 Admin |
+
+Ablehnen = Spot löschen (`DELETE /api/spots/{id}`). Bearbeiten (`PUT /api/spots/{id}`) gilt ebenfalls als Prüfung.
 
 ### Admins
 
