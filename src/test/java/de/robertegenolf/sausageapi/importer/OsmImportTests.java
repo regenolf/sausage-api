@@ -150,7 +150,7 @@ class OsmImportTests {
 
 		// geprüft: OSM-Änderungen werden nicht mehr übernommen
 		mvc.perform(post("/api/admin/imports/osm").param("category", category).with(httpBasic(admin, PASSWORD))
-						.contentType(MediaType.APPLICATION_JSON).content(collection(node(node, "Ganz anders", null))))
+						.contentType(MediaType.APPLICATION_JSON).content(collection(node(node, "Wurstbude ganz anders", null))))
 				.andExpect(jsonPath("$.updated").value(0))
 				.andExpect(jsonPath("$.keptVerified").value(1));
 		mvc.perform(get("/api/spots/" + spotId)).andExpect(jsonPath("$.name").value("Wurstbude Krause"));

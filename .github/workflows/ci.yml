@@ -24,17 +24,7 @@ jobs:
           cache: maven
       # Die Tests starten Postgres selbst über Testcontainers (Docker ist auf dem Runner vorhanden)
       - name: Build und Tests
-        run: ./mvnw -B verify 2>&1 | tee build.log; exit ${PIPESTATUS[0]}
-      - name: DEBUG Fehler als Annotation
-        if: failure()
-        run: |
-          enc() { sed -e ':a;N;$!ba' -e 's/%/%25/g;s/\r/%0D/g;s/\n/%0A/g'; }
-          echo "::error title=maven::$(grep -E '\[ERROR\]' build.log | head -60 | cut -c1-400 | enc)"
-          for f in target/surefire-reports/*.txt; do
-            if grep -qE 'FAILURE|ERROR' "$f"; then
-              echo "::error title=$(basename $f)::$(grep -A15 -E '<<< (FAILURE|ERROR)' "$f" | head -80 | cut -c1-400 | enc)"
-            fi
-          done
+        run: ./mvnw -B verify
 
   docker:
     name: Docker-Image
