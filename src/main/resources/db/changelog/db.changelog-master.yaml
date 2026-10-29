@@ -56,3 +56,6 @@ databaseChangeLog:
   - include:
       file: db/changelog/changes/019-report-snapshot.sql
       relativeToChangelogFile: false
+  - include:
+      file: db/changelog/changes/020-spot-import.sql
+      relativeToChangelogFile: false
