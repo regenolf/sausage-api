@@ -25,6 +25,8 @@ import java.util.Set;
  * <li>gelöschte Buden kommen nicht wieder (Sperrliste spot_import_rejection),</li>
  * <li>Buden, die in OSM verschwunden sind, werden nur gezählt ({@code stale}), nicht gelöscht.</li>
  * </ul>
+ * Features, die keine Bude, aber eine Adresse sind (Hausnummer mit Straße oder Ort), dienen nur dazu, fehlende
+ * Adressen der Buden zu ergänzen ({@link OsmAddresses}); sie werden nicht gespeichert.
  * Der Import lässt sich beliebig oft wiederholen.
  */
 @Service
@@ -38,10 +40,13 @@ class OsmImporter {
 	/**
 	 * Ergebnis eines Imports. {@code received} = Features in der Datei, {@code matched} = als Bratwurstbude erkannt
 	 * (ohne doppelte IDs); diese verteilen sich auf created/updated/unchanged/keptVerified/skippedRejected.
+	 * {@code addressPoints} = mitgeschickte Adressen (nicht in skippedNoMatch), {@code addressesCompleted} /
+	 * {@code citiesCompleted} = Buden, deren Adresse bzw. Ort daraus ergänzt wurde.
 	 */
 	public record ImportResult(boolean dryRun, String category, int received, int matched, int created, int updated,
 			int unchanged, int keptVerified, int skippedRejected, int skippedNoMatch, int skippedNoName,
-			int skippedInvalid, int skippedDuplicate, int stale, List<String> newSpots) {
+			int skippedInvalid, int skippedDuplicate, int stale, int addressPoints, int addressesCompleted,
+			int citiesCompleted, List<String> newSpots) {
 	}
 
 	private final ImportRepository repository;
@@ -60,49 +65,73 @@ class OsmImporter {
 		List<String> newSpots = new ArrayList<>();
 		int matched = 0, created = 0, updated = 0, unchanged = 0, keptVerified = 0, skippedRejected = 0;
 		int skippedNoMatch = 0, skippedNoName = 0, skippedInvalid = 0, skippedDuplicate = 0;
+		int addressesCompleted = 0, citiesCompleted = 0;
 
+		// 1. Durchlauf: Buden erkennen, Adresspunkte sammeln
+		OsmAddresses addresses = new OsmAddresses();
+		List<Candidate> candidates = new ArrayList<>();
 		for (Feature feature : features) {
 			Result result = OsmFeatures.classify(feature);
 			switch (result.outcome()) {
-				case NO_MATCH -> skippedNoMatch++;
-				case NO_NAME -> skippedNoName++;
-				case INVALID -> skippedInvalid++;
-				case MATCH -> {
-					Candidate candidate = result.candidate();
-					if (!seen.add(candidate.externalId())) {
-						skippedDuplicate++;
-						continue;
-					}
-					matched++;
-					ExistingSpot spot = existing.get(candidate.externalId());
-					if (spot == null) {
-						if (rejected.contains(candidate.externalId())) {
-							skippedRejected++;
-							continue;
-						}
-						created++;
-						if (newSpots.size() < MAX_NEW_NAMES) {
-							newSpots.add(candidate.city() == null ? candidate.name()
-									: candidate.name() + " (" + candidate.city() + ")");
-						}
-						if (!dryRun) {
-							repository.insert(SOURCE, categoryId, candidate, now);
-						}
-					}
-					else if (spot.verified()) {
-						keptVerified++;
-						touched.add(spot.id());
-					}
-					else if (spot.sameAs(candidate)) {
-						unchanged++;
-						touched.add(spot.id());
+				case NO_MATCH -> {
+					OsmAddresses.Address address = OsmAddresses.parse(feature);
+					if (address != null) {
+						addresses.add(address);
 					}
 					else {
-						updated++;
-						if (!dryRun) {
-							repository.update(spot.id(), candidate, now);
-						}
+						skippedNoMatch++;
 					}
+				}
+				case NO_NAME -> skippedNoName++;
+				case INVALID -> skippedInvalid++;
+				case MATCH -> candidates.add(result.candidate());
+			}
+		}
+
+		// 2. Durchlauf: fehlende Adressen ergänzen und mit dem Bestand abgleichen
+		for (Candidate found : candidates) {
+			if (!seen.add(found.externalId())) {
+				skippedDuplicate++;
+				continue;
+			}
+			matched++;
+			OsmAddresses.Completed completed = addresses.complete(found);
+			Candidate candidate = completed.candidate();
+			ExistingSpot spot = existing.get(candidate.externalId());
+			if (spot == null && rejected.contains(candidate.externalId())) {
+				skippedRejected++;
+				continue;
+			}
+			if (spot == null || !spot.verified()) {
+				switch (completed.completion()) {
+					case ADDRESS -> addressesCompleted++;
+					case CITY -> citiesCompleted++;
+					case NONE -> {
+					}
+				}
+			}
+			if (spot == null) {
+				created++;
+				if (newSpots.size() < MAX_NEW_NAMES) {
+					newSpots.add(candidate.city() == null ? candidate.name()
+							: candidate.name() + " (" + candidate.city() + ")");
+				}
+				if (!dryRun) {
+					repository.insert(SOURCE, categoryId, candidate, now);
+				}
+			}
+			else if (spot.verified()) {
+				keptVerified++;
+				touched.add(spot.id());
+			}
+			else if (spot.sameAs(candidate)) {
+				unchanged++;
+				touched.add(spot.id());
+			}
+			else {
+				updated++;
+				if (!dryRun) {
+					repository.update(spot.id(), candidate, now);
 				}
 			}
 		}
@@ -115,6 +144,6 @@ class OsmImporter {
 				.count();
 		return new ImportResult(dryRun, categoryCode, features.size(), matched, created, updated, unchanged,
 				keptVerified, skippedRejected, skippedNoMatch, skippedNoName, skippedInvalid, skippedDuplicate, stale,
-				List.copyOf(newSpots));
+				addresses.size(), addressesCompleted, citiesCompleted, List.copyOf(newSpots));
 	}
 }

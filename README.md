@@ -257,11 +257,16 @@ passendem `food:*`-Tag oder „Wurst“, „Würstchen“ bzw. „Rostbrat…“
 - ungeprüfte Buden übernehmen bei jedem Import den aktuellen Stand aus OSM,
 - **geprüfte** Buden (bestätigt oder von einem Admin bearbeitet) überschreibt der Import nicht mehr,
 - **gelöschte** importierte Buden kommen nicht wieder (Sperrliste `spot_import_rejection`, per Trigger gefüllt),
-- in OSM verschwundene Buden werden nur gezählt (`stale`), nicht gelöscht.
+- in OSM verschwundene Buden werden nur gezählt (`stale`), nicht gelöscht,
+- **fehlende Adressen** werden ergänzt: Buden sind in OSM oft nur ein Punkt mit Namen. Das Skript schickt deshalb auch
+  die Adresspunkte und Gebäudeadressen bis 600 m um jede Bude mit (nur zum Abgleich, sie werden nicht gespeichert).
+  Ohne Straße übernimmt die Bude die nächste Adresse im Umkreis von 50 m, sonst wenigstens Ort und PLZ der nächsten
+  Adresse bis 500 m (`OsmAddresses.java`). Vorhandene Werte aus OSM werden nie überschrieben, geprüfte Buden bleiben
+  wie sie sind.
 
 | Methode | Pfad | Beschreibung |
 |---|---|---|
-| `POST` | `/api/admin/imports/osm?category=BRATWURST&dryRun=false` | GeoJSON aus `osmium export --add-unique-id=type_id` importieren; Antwort mit Zählern (`created`, `updated`, `unchanged`, `keptVerified`, `skippedRejected`, `stale`, …) und den Namen neuer Buden (`newSpots`) 🔒 Admin |
+| `POST` | `/api/admin/imports/osm?category=BRATWURST&dryRun=false` | GeoJSON aus `osmium export --add-unique-id=type_id` importieren; Antwort mit Zählern (`created`, `updated`, `unchanged`, `keptVerified`, `skippedRejected`, `stale`, `addressPoints`, `addressesCompleted`, `citiesCompleted`, …) und den Namen neuer Buden (`newSpots`) 🔒 Admin |
 | `GET` | `/api/admin/spots/unverified?source=OSM&limit=200` | Prüfliste: ungeprüfte Spots, älteste zuerst, mit `sourceUrl`; Gesamtzahl im Header `X-Total-Count` 🔒 Admin |
 | `POST` | `/api/admin/spots/{id}/verify` | Spot bestätigen 🔒 Admin |
 
