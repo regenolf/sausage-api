@@ -29,10 +29,10 @@ final class OsmFeatures {
 
 	/** Spaltenlängen der Tabelle spot. */
 	private static final int MAX_NAME = 150;
-	private static final int MAX_STREET = 150;
-	private static final int MAX_HOUSE_NUMBER = 20;
-	private static final int MAX_ZIP_CODE = 10;
-	private static final int MAX_CITY = 100;
+	static final int MAX_STREET = 150;
+	static final int MAX_HOUSE_NUMBER = 20;
+	static final int MAX_ZIP_CODE = 10;
+	static final int MAX_CITY = 100;
 	private static final int MAX_OPENING_HOURS = 500;
 
 	enum Outcome {
@@ -198,7 +198,7 @@ final class OsmFeatures {
 		return BigDecimal.valueOf(value).setScale(6, RoundingMode.HALF_UP);
 	}
 
-	private static String tag(Map<String, Object> tags, String key) {
+	static String tag(Map<String, Object> tags, String key) {
 		Object value = tags.get(key);
 		if (value == null) {
 			return null;
@@ -207,7 +207,7 @@ final class OsmFeatures {
 		return text.isEmpty() ? null : text;
 	}
 
-	private static String truncate(String value, int max) {
+	static String truncate(String value, int max) {
 		if (value == null || value.length() <= max) {
 			return value;
 		}

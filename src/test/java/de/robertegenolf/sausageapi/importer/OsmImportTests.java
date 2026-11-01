@@ -118,6 +118,38 @@ class OsmImportTests {
 	}
 
 	@Test
+	void ergaenztFehlendeAdressenAusAdresspunkten() throws Exception {
+		String admin = admin();
+		String category = category(admin);
+		long node = randomId();
+		// Bude bei [11.03, 50.97] ohne Adresse, Hausadresse ca. 20 m nördlich, weiterer Adresspunkt weit weg
+		String body = collection(node(node, "Rostbratwurst am Anger", null),
+				"{\"type\":\"Feature\",\"id\":\"a%d\",\"geometry\":{\"type\":\"Point\",\"coordinates\":[11.03,50.97018]},\"properties\":{\"addr:street\":\"Anger\",\"addr:housenumber\":\"1\",\"addr:postcode\":\"99084\",\"addr:city\":\"Erfurt\"}}"
+						.formatted(randomId() * 2),
+				"{\"type\":\"Feature\",\"id\":\"n%d\",\"geometry\":{\"type\":\"Point\",\"coordinates\":[11.2,51.1]},\"properties\":{\"addr:street\":\"Fern\",\"addr:housenumber\":\"2\",\"addr:city\":\"Woanders\"}}"
+						.formatted(randomId()));
+
+		mvc.perform(post("/api/admin/imports/osm").param("category", category)
+						.with(httpBasic(admin, PASSWORD)).contentType(MediaType.APPLICATION_JSON).content(body))
+				.andExpect(status().isOk())
+				.andExpect(jsonPath("$.matched").value(1))
+				.andExpect(jsonPath("$.created").value(1))
+				.andExpect(jsonPath("$.addressPoints").value(2))
+				.andExpect(jsonPath("$.addressesCompleted").value(1))
+				.andExpect(jsonPath("$.citiesCompleted").value(0))
+				.andExpect(jsonPath("$.skippedNoMatch").value(0))
+				.andExpect(jsonPath("$.newSpots[0]").value("Rostbratwurst am Anger (Erfurt)"));
+		assertThat(countImported(category)).isEqualTo(1);
+
+		mvc.perform(get("/api/spots/" + spotId("node/" + node)))
+				.andExpect(jsonPath("$.street").value("Anger"))
+				.andExpect(jsonPath("$.houseNumber").value("1"))
+				.andExpect(jsonPath("$.zipCode").value("99084"))
+				.andExpect(jsonPath("$.city").value("Erfurt"))
+				.andExpect(jsonPath("$.latitude").value(50.97));
+	}
+
+	@Test
 	void uebernimmtAenderungenNurBisZurPruefung() throws Exception {
 		String admin = admin();
 		String category = category(admin);
