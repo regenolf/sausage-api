@@ -240,15 +240,19 @@ Hinweis auf Widerspruch per Antwort-Mail). Im Datenexport stehen die eigenen gem
 ### Datenimport aus OpenStreetMap
 
 Bratwurstbuden aus OpenStreetMap lassen sich wiederholt importieren. `tools/osm-import/osm-import.sh` lädt den
-Regionsauszug von [Geofabrik](https://download.geofabrik.de/) (Standard Thüringen), filtert ihn mit `osmium` und schickt
-die Kandidaten an die API:
+Regionsauszug von [Geofabrik](https://download.geofabrik.de/) (Standard ganz Deutschland, ca. 4,5 GB), filtert ihn mit
+`osmium` und schickt die Kandidaten an die API:
 
 ```bash
 brew install osmium-tool jq                                  # bzw. apt install osmium-tool jq
 API_URL=https://www.wurst-weiser.de tools/osm-import/osm-import.sh           # Probelauf, speichert nichts
 API_URL=https://www.wurst-weiser.de tools/osm-import/osm-import.sh --apply   # importieren
-REGION=europe/germany API_URL=… tools/osm-import/osm-import.sh             # ganz Deutschland
+REGION=europe/germany/thueringen API_URL=… tools/osm-import/osm-import.sh  # nur ein Bundesland
+PBF=~/Downloads/germany-latest.osm.pbf API_URL=… tools/osm-import/osm-import.sh   # vorhandene Datei statt Download
 ```
+
+Für ganz Deutschland braucht der Lauf je nach Rechner 10–20 Minuten, rund 10 GB freien Platz im `WORKDIR` und
+einige GB RAM für `osmium`. Der Download wird wiederverwendet (nur neu geladen, wenn Geofabrik eine neuere Datei hat).
 
 Als Bude gilt ein Imbiss, Restaurant, Biergarten oder Food-Court mit `cuisine=sausage|bratwurst|currywurst|hot_dog`,
 passendem `food:*`-Tag oder „Wurst“, „Würstchen“ bzw. „Rostbrat…“ im Namen (`OsmFeatures.java`). Regeln beim Import:
@@ -258,8 +262,10 @@ passendem `food:*`-Tag oder „Wurst“, „Würstchen“ bzw. „Rostbrat…“
 - **geprüfte** Buden (bestätigt oder von einem Admin bearbeitet) überschreibt der Import nicht mehr,
 - **gelöschte** importierte Buden kommen nicht wieder (Sperrliste `spot_import_rejection`, per Trigger gefüllt),
 - in OSM verschwundene Buden werden nur gezählt (`stale`), nicht gelöscht,
-- **fehlende Adressen** werden ergänzt: Buden sind in OSM oft nur ein Punkt mit Namen. Das Skript schickt deshalb auch
-  die Adresspunkte und Gebäudeadressen bis 600 m um jede Bude mit (nur zum Abgleich, sie werden nicht gespeichert).
+- **fehlende Adressen** werden ergänzt: Buden sind in OSM oft nur ein Punkt mit Namen. Das Skript schneidet deshalb die
+  Adressen rund um die Kandidaten aus und schickt je Bude die nächste Adresse mit Straße (bis 80 m) und die nächste mit
+  Ort (bis 600 m) mit, nur zum Abgleich, sie werden nicht gespeichert. So bleibt die Importdatei auch für ganz Deutschland
+  bei wenigen MB (Grenze: 12 MB durch nginx).
   Ohne Straße übernimmt die Bude die nächste Adresse im Umkreis von 50 m, sonst wenigstens Ort und PLZ der nächsten
   Adresse bis 500 m (`OsmAddresses.java`). Vorhandene Werte aus OSM werden nie überschrieben, geprüfte Buden bleiben
   wie sie sind.

@@ -19,7 +19,8 @@
 #   API_URL         Basis-URL der API (Standard http://localhost:8080; Produktion https://www.wurst-weiser.de)
 #   ADMIN_USER      Benutzername eines Admins (wird sonst abgefragt)
 #   ADMIN_PASSWORD  Passwort (wird sonst verdeckt abgefragt)
-#   REGION          Geofabrik-Pfad (Standard europe/germany/thueringen; ganz Deutschland: europe/germany)
+#   REGION          Geofabrik-Pfad (Standard europe/germany = ganz Deutschland, ca. 4,5 GB; nur Thüringen:
+#                   europe/germany/thueringen)
 #   CATEGORY        Kategorie-Code der Spots (Standard BRATWURST)
 #   WORKDIR         Arbeitsverzeichnis für Downloads (Standard ~/.cache/sausage-osm-import; wird wiederverwendet)
 #   PBF             eigene .osm.pbf-Datei statt des Geofabrik-Downloads (optional)
@@ -30,7 +31,7 @@ set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 API_URL="${API_URL:-http://localhost:8080}"
-REGION="${REGION:-europe/germany/thueringen}"
+REGION="${REGION:-europe/germany}"
 CATEGORY="${CATEGORY:-BRATWURST}"
 WORKDIR="${WORKDIR:-$HOME/.cache/sausage-osm-import}"
 DRY_RUN=true
@@ -39,7 +40,7 @@ for arg in "$@"; do
 	case "$arg" in
 		--apply) DRY_RUN=false ;;
 		--dry-run) DRY_RUN=true ;;
-		-h|--help) sed -n '2,30p' "$0"; exit 0 ;;
+		-h|--help) sed -n '2,29p' "$0"; exit 0 ;;
 		*) echo "Unbekannte Option: $arg (erlaubt: --apply, --dry-run)" >&2; exit 2 ;;
 	esac
 done
@@ -55,6 +56,8 @@ food="$WORKDIR/$name-food.osm.pbf"
 geojson="$WORKDIR/$name-food.geojson"
 candidates="$WORKDIR/$name-candidates.geojson"
 addresses_pbf="$WORKDIR/$name-addresses.osm.pbf"
+area="$WORKDIR/$name-candidate-area.geojson"
+addresses_near_pbf="$WORKDIR/$name-addresses-near.osm.pbf"
 addresses_seq="$WORKDIR/$name-addresses.geojsonseq"
 cells="$WORKDIR/$name-cells.json"
 nearby="$WORKDIR/$name-addresses-nearby.json"
@@ -93,46 +96,57 @@ size="$(du -h "$candidates" | cut -f1)"
 echo "==> $total Gastro-Orte in OSM, davon $count Kandidaten ($size)"
 
 echo "==> Suche Adressen in der Nähe der Kandidaten"
-osmium tags-filter "$pbf" nwr/addr:housenumber -o "$addresses_pbf" --overwrite
-osmium export "$addresses_pbf" -c "$SCRIPT_DIR/osmium-export-addresses.json" --add-unique-id=type_id \
-	--geometry-types=point,polygon -f geojsonseq --format-option print_record_separator=false \
-	-o "$addresses_seq" --overwrite
-
 # Position: Punkt bzw. Mittel der Eckpunkte des äußeren Rings (wie OsmFeatures.position).
-# Rasterzellen von 0,01° (ca. 1,1 km x 0,7 km) mit den Positionen der Kandidaten
+# Rasterzellen von 0,01° (ca. 1,1 km x 0,7 km) mit Position und laufender Nummer der Kandidaten.
 jq -c '
 	def ring: if (.[0][0] | type) == "number" then . else (.[0] | ring) end;
 	def pos: if .geometry.type == "Point" then .geometry.coordinates
 		else (.geometry.coordinates | ring) as $r | [($r | map(.[0]) | add / length), ($r | map(.[1]) | add / length)] end;
-	reduce (.features[] | pos) as $p ({};
-		.["\(($p[1] * 100) | floor):\(($p[0] * 100) | floor)"] += [[$p[1], $p[0]]])' "$candidates" > "$cells"
+	reduce (.features | to_entries[] | [(.value | pos), .key]) as [$p, $i] ({};
+		.["\(($p[1] * 100) | floor):\(($p[0] * 100) | floor)"] += [[$p[1], $p[0], $i]])' "$candidates" > "$cells"
 
-# Zeilenweise (wenig Speicher): nur Adressen bis 600 m von einem Kandidaten. Bis 80 m alle (für Straße und
-# Hausnummer), weiter weg reicht eine Adresse je Ort, PLZ und Rasterfeld von 0,002° (für den Ort).
-jq -c --slurpfile cells "$cells" '
+# Nur Adressen in diesen Zellen und ihren Nachbarn ausschneiden: bei ganz Deutschland bleiben so von Millionen
+# Gebäudeadressen nur die rund um die Buden übrig (spart Speicher und Zeit beim Export).
+jq -c 'keys | map(split(":") | map(tonumber)) as $cells
+	| [range(-1; 2) as $dr | range(-1; 2) as $dc | $cells[] | [.[0] + $dr, .[1] + $dc]] | unique
+	| {type: "Feature", properties: {}, geometry: {type: "MultiPolygon", coordinates: map(
+		(.[0] / 100) as $s | ((.[0] + 1) / 100) as $n | (.[1] / 100) as $w | ((.[1] + 1) / 100) as $e
+		| [[[$w, $s], [$e, $s], [$e, $n], [$w, $n], [$w, $s]]])}}' "$cells" > "$area"
+
+osmium tags-filter "$pbf" nwr/addr:housenumber -o "$addresses_pbf" --overwrite
+osmium extract -p "$area" -s complete_ways "$addresses_pbf" -o "$addresses_near_pbf" --overwrite
+osmium export "$addresses_near_pbf" -c "$SCRIPT_DIR/osmium-export-addresses.json" --add-unique-id=type_id \
+	--geometry-types=point,polygon -f geojsonseq --format-option print_record_separator=false \
+	-o "$addresses_seq" --overwrite
+
+# Je Bude nur zwei Adressen mitschicken (hält die Importdatei klein, auch für ganz Deutschland):
+# die nächste mit Straße bis 80 m (für Straße und Hausnummer) und die nächste mit Ort bis 600 m (für den Ort).
+# Die API wählt daraus nach denselben Regeln (50 m / 500 m, OsmAddresses.java).
+jq -cn --slurpfile cells "$cells" '
 	def ring: if (.[0][0] | type) == "number" then . else (.[0] | ring) end;
 	def pos: if .geometry.type == "Point" then .geometry.coordinates
 		else (.geometry.coordinates | ring) as $r | [($r | map(.[0]) | add / length), ($r | map(.[1]) | add / length)] end;
-	. as $feature | pos as $p | $p[1] as $lat | $p[0] as $lon
-	| (($lat * 100) | floor) as $r | (($lon * 100) | floor) as $c
-	| [range(-1; 2) as $dr | range(-1; 2) as $dc | ($cells[0]["\($r + $dr):\($c + $dc)"] // [])[]]
-	| map(((($lon - .[1]) * ((($lat + .[0]) / 2 * 0.017453293) | cos)) as $x | ($lat - .[0]) as $y
-		| (($x * $x + $y * $y) | sqrt) * 111320)) | min as $d
-	| select($d != null and $d <= 600)
-	| $feature | {type, id, geometry: {type: "Point", coordinates: $p}, properties: (.properties + {_near: ($d <= 80)})}' \
-	"$addresses_seq" \
-	| jq -cs '(map(select(.properties._near)) + (map(select(.properties._near | not))
-		| unique_by([.properties["addr:city"] // .properties["addr:place"], .properties["addr:postcode"],
-			(.geometry.coordinates | map(. * 500 | floor))])))
-		| map(del(.properties._near))' > "$nearby"
+	def dist($lat; $lon; $k): (($lon - $k[1]) * ((($lat + $k[0]) / 2 * 0.017453293) | cos)) as $x
+		| ($lat - $k[0]) as $y | (($x * $x + $y * $y) | sqrt) * 111320;
+	$cells[0] as $cells
+	| reduce (inputs | pos as $p
+		| {f: {type, id, geometry: {type: "Point", coordinates: $p}, properties}, lat: $p[1], lon: $p[0]}) as $a ({};
+		(($a.lat * 100) | floor) as $r | (($a.lon * 100) | floor) as $c
+		| ($a.f.properties["addr:street"] != null) as $street
+		| (($a.f.properties["addr:city"] // $a.f.properties["addr:place"]) != null) as $city
+		| reduce (range(-1; 2) as $dr | range(-1; 2) as $dc | ($cells["\($r + $dr):\($c + $dc)"] // [])[]) as $k (.;
+			dist($a.lat; $a.lon; $k) as $d
+			| if $street and $d <= 80 and $d < (.["s\($k[2])"].d // 1e9) then .["s\($k[2])"] = {d: $d, f: $a.f} else . end
+			| if $city and $d <= 600 and $d < (.["c\($k[2])"].d // 1e9) then .["c\($k[2])"] = {d: $d, f: $a.f} else . end))
+	| [.[].f] | unique_by(.id)' "$addresses_seq" > "$nearby"
 
 jq -c --slurpfile nearby "$nearby" '.features += $nearby[0]' "$candidates" > "$payload"
 addresses="$(jq 'length' "$nearby")"
 size="$(du -h "$payload" | cut -f1)"
-echo "==> $addresses Adressen in der Nähe, Importdatei $size"
+echo "==> $addresses Adressen für $count Kandidaten, Importdatei $size"
 if (( $(wc -c < "$payload") > 11 * 1024 * 1024 )); then
-	echo "Achtung: nginx im Frontend nimmt höchstens 12 MB an (client_max_body_size). Bei Fehler 413 die Region"
-	echo "verkleinern oder direkt gegen die API importieren (API_URL auf den Backend-Port)."
+	echo "Achtung: nginx im Frontend nimmt höchstens 12 MB an (client_max_body_size). Bei Fehler 413 eine kleinere"
+	echo "REGION nehmen (z. B. europe/germany/bayern) oder direkt gegen die API importieren (API_URL auf den Backend-Port)."
 fi
 
 if [[ -z "${ADMIN_USER:-}" ]]; then
