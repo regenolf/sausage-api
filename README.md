@@ -52,7 +52,7 @@ sausage-app macht dasselbe für den Dienst `app`. Beide Repos deployen unabhäng
 
    ```bash
    apt update && apt upgrade -y
-   apt install -y ufw fail2ban unattended-upgrades restic
+   apt install -y ufw fail2ban unattended-upgrades
    curl -fsSL https://get.docker.com | sh
    adduser --disabled-password --gecos "" deploy && usermod -aG sudo,docker deploy
    install -d -o deploy -g deploy /opt/sausage
@@ -96,8 +96,7 @@ sausage-app macht dasselbe für den Dienst `app`. Beide Repos deployen unabhäng
    `docker compose -f docker-compose.prod.yml exec db psql -U sausage -c "UPDATE app_user SET role='ADMIN' WHERE username='<name>'"`.
 
 **Backups** liegen in `/opt/sausage/backups` – zusätzlich außerhalb des Servers sichern (sie enthalten auch alle Fotos).
-Dafür schiebt `restic` den Ordner täglich auf eine Hetzner Storage Box (Einrichtung siehe Umzugs-Anleitung im
-Projekt). Wiederherstellen:
+Wiederherstellen:
 
 ```bash
 docker compose -f docker-compose.prod.yml exec -T db pg_restore -U sausage -d sausage --clean < backups/sausage-JJJJ-MM-TT_HHMM.dump
