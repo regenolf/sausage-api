@@ -29,7 +29,7 @@ Let's-Encrypt-Zertifikat) → nginx der App (`regenolf/sausage-app`, liefert die
 → Postgres, dazu ein tägliches `pg_dump` nach `backups/`. API, Datenbank, Actuator und Swagger sind von außen
 nicht erreichbar, nur `https://DOMAIN` und `https://DOMAIN/api/…`.
 
-Live unter **https://www.wurst-weiser.de** (KVM-Server bei Hostinger, Domain bei Alfahosting).
+Live unter **https://www.wurst-weiser.de** (KVM-Server bei Realtox Media in Düsseldorf, Domain bei Alfahosting).
 
 #### Pipeline
 
@@ -48,18 +48,22 @@ sausage-app macht dasselbe für den Dienst `app`. Beide Repos deployen unabhäng
 
 1. **DNS bei Alfahosting:** A-Records für `www` und `@` (die Domain ohne www) auf die IPv4 des Servers, bei IPv6
    zusätzlich AAAA-Records. MX-Einträge (E-Mail) bleiben unverändert. Prüfen: `dig +short www.wurst-weiser.de`.
-2. **Server (Ubuntu 24.04)** als root:
+2. **Server (Ubuntu LTS, 24.04 oder 26.04)** als root:
 
    ```bash
+   apt update && apt upgrade -y
+   apt install -y ufw fail2ban unattended-upgrades restic
    curl -fsSL https://get.docker.com | sh
-   adduser --disabled-password --gecos "" deploy && usermod -aG docker deploy
+   adduser --disabled-password --gecos "" deploy && usermod -aG sudo,docker deploy
    install -d -o deploy -g deploy /opt/sausage
    ufw allow OpenSSH && ufw allow 80/tcp && ufw allow 443 && ufw enable
+   dpkg-reconfigure -f noninteractive unattended-upgrades
    ```
 
    Danach den **öffentlichen** Pipeline-Schlüssel in `/home/deploy/.ssh/authorized_keys` eintragen und in
    `/etc/ssh/sshd_config` `PasswordAuthentication no` sowie `PermitRootLogin prohibit-password` setzen
-   (vorher den eigenen Schlüssel hinterlegen!). In der Hostinger-Firewall ebenfalls nur 22, 80 und 443 freigeben.
+   (vorher den eigenen Schlüssel hinterlegen!). Bietet der Hoster eine eigene Firewall im Kundenmenü, dort ebenfalls nur
+   22, 80 und 443 freigeben.
 3. **Schlüssel für die Pipeline** (lokal): `ssh-keygen -t ed25519 -f sausage-deploy -N "" -C github-actions`.
 4. **`.env` auf dem Server** (`/opt/sausage/.env`, nur dort, nie in Git) nach `deploy/.env.example` anlegen:
    `DOMAIN=www.wurst-weiser.de`, `REDIRECT_DOMAINS=wurst-weiser.de`, `DB_PASSWORD` und `JWT_SECRET` jeweils mit
@@ -91,8 +95,9 @@ sausage-app macht dasselbe für den Dienst `app`. Beide Repos deployen unabhäng
 7. **Ersten Admin anlegen:** registrieren und dann
    `docker compose -f docker-compose.prod.yml exec db psql -U sausage -c "UPDATE app_user SET role='ADMIN' WHERE username='<name>'"`.
 
-**Backups** liegen in `/opt/sausage/backups` – zusätzlich außerhalb des Servers sichern (sie enthalten auch alle Fotos),
-z. B. per `rclone` oder den Snapshots von Hostinger. Wiederherstellen:
+**Backups** liegen in `/opt/sausage/backups` – zusätzlich außerhalb des Servers sichern (sie enthalten auch alle Fotos).
+Dafür schiebt `restic` den Ordner täglich auf eine Hetzner Storage Box (Einrichtung siehe Umzugs-Anleitung im
+Projekt). Wiederherstellen:
 
 ```bash
 docker compose -f docker-compose.prod.yml exec -T db pg_restore -U sausage -d sausage --clean < backups/sausage-JJJJ-MM-TT_HHMM.dump
