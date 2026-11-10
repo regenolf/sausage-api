@@ -1,6 +1,5 @@
 package de.robertegenolf.sausageapi.security;
 
-import de.robertegenolf.sausageapi.user.UserRepository;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
@@ -9,47 +8,47 @@ import org.springframework.security.config.Customizer;
 import org.springframework.security.config.annotation.web.builders.HttpSecurity;
 import org.springframework.security.config.annotation.web.configuration.EnableWebSecurity;
 import org.springframework.security.config.http.SessionCreationPolicy;
-import org.springframework.security.core.userdetails.User;
-import org.springframework.security.core.userdetails.UserDetailsService;
-import org.springframework.security.core.userdetails.UsernameNotFoundException;
-import org.springframework.security.crypto.bcrypt.BCryptPasswordEncoder;
-import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.security.web.SecurityFilterChain;
 import org.springframework.security.web.access.intercept.AuthorizationFilter;
 import org.springframework.web.cors.CorsConfiguration;
-import org.springframework.web.filter.CorsFilter;
 import org.springframework.web.cors.CorsConfigurationSource;
 import org.springframework.web.cors.UrlBasedCorsConfigurationSource;
 
 import java.util.List;
 
+/**
+ * Lesende Endpunkte sind öffentlich, alles andere braucht ein Keycloak-Token ({@code Authorization: Bearer …}).
+ * Aktive Accounts haben {@code ROLE_USER} bzw. {@code ROLE_ADMIN}; gesperrte dürfen nur Daten exportieren und das
+ * Konto löschen.
+ */
 @Configuration
 @EnableWebSecurity
 class SecurityConfig {
 
+	private static final String[] ACTIVE = {"USER", "ADMIN"};
+
 	@Bean
-	SecurityFilterChain securityFilterChain(HttpSecurity http, UserJwtAuthenticationConverter jwtConverter,
-			LoginThrottle loginThrottle) throws Exception {
+	SecurityFilterChain securityFilterChain(HttpSecurity http, KeycloakJwtAuthenticationConverter jwtConverter,
+			RequestThrottle throttle) throws Exception {
 		http
 				.csrf(csrf -> csrf.disable())
 				.cors(Customizer.withDefaults())
 				.sessionManagement(session -> session.sessionCreationPolicy(SessionCreationPolicy.STATELESS))
 				.authorizeHttpRequests(auth -> auth
 						.requestMatchers("/api/admin/**").hasRole("ADMIN")
-						.requestMatchers(HttpMethod.POST, "/api/users", "/api/auth/login", "/api/auth/register", "/api/reports",
-								"/api/auth/password-reset", "/api/auth/password-reset/confirm", "/api/auth/data/export",
-								"/api/auth/data/delete").permitAll()
+						// DSGVO: auch gesperrte Accounts
+						.requestMatchers(HttpMethod.GET, "/api/users/me/export").authenticated()
+						.requestMatchers(HttpMethod.DELETE, "/api/users/me").authenticated()
+						.requestMatchers(HttpMethod.POST, "/api/reports").permitAll()
 						.requestMatchers(HttpMethod.POST, "/api/categories").hasRole("ADMIN")
-						.requestMatchers(HttpMethod.GET, "/api/users/me", "/api/users/me/**", "/api/spots/*/ratings/me").authenticated()
+						.requestMatchers(HttpMethod.GET, "/api/users/me", "/api/users/me/**", "/api/spots/*/ratings/me")
+								.hasAnyRole(ACTIVE)
 						.requestMatchers(HttpMethod.GET, "/api/**").permitAll()
 						.requestMatchers("/actuator/health/**", "/error").permitAll()
 						.requestMatchers(HttpMethod.GET, "/v3/api-docs/**", "/swagger-ui.html", "/swagger-ui/**").permitAll()
-						.anyRequest().authenticated())
-				.httpBasic(basic -> {
-				})
+						.anyRequest().hasAnyRole(ACTIVE))
 				.oauth2ResourceServer(oauth -> oauth.jwt(jwt -> jwt.jwtAuthenticationConverter(jwtConverter)))
-				.addFilterAfter(new BasicAuthThrottleFilter(loginThrottle), CorsFilter.class)
-				.addFilterBefore(new WriteThrottleFilter(loginThrottle), AuthorizationFilter.class);
+				.addFilterBefore(new WriteThrottleFilter(throttle), AuthorizationFilter.class);
 		return http.build();
 	}
 
@@ -68,20 +67,5 @@ class SecurityConfig {
 		UrlBasedCorsConfigurationSource source = new UrlBasedCorsConfigurationSource();
 		source.registerCorsConfiguration("/api/**", config);
 		return source;
-	}
-
-	@Bean
-	PasswordEncoder passwordEncoder() {
-		return new BCryptPasswordEncoder();
-	}
-
-	@Bean
-	UserDetailsService userDetailsService(UserRepository users) {
-		return username -> users.findByUsername(username)
-				.map(u -> User.withUsername(u.username())
-						.password(u.passwordHash())
-						.roles(u.role())
-						.build())
-				.orElseThrow(() -> new UsernameNotFoundException("Unbekannter Benutzer"));
 	}
 }

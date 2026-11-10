@@ -1,0 +1,189 @@
+{
+  "realm": "sausage",
+  "displayName": "Wurst Weiser",
+  "enabled": true,
+  "sslRequired": "external",
+
+  "registrationAllowed": true,
+  "registrationEmailAsUsername": false,
+  "editUsernameAllowed": false,
+  "loginWithEmailAllowed": true,
+  "duplicateEmailsAllowed": false,
+  "resetPasswordAllowed": true,
+  "rememberMe": true,
+  "verifyEmail": false,
+
+  "bruteForceProtected": true,
+  "permanentLockout": false,
+  "failureFactor": 10,
+  "waitIncrementSeconds": 60,
+  "maxFailureWaitSeconds": 900,
+  "maxDeltaTimeSeconds": 43200,
+
+  "passwordPolicy": "length(8) and maxLength(72) and notUsername and notEmail",
+
+  "internationalizationEnabled": true,
+  "supportedLocales": [
+    "de",
+    "en"
+  ],
+  "defaultLocale": "de",
+
+  "accessTokenLifespan": 300,
+  "ssoSessionIdleTimeout": 2592000,
+  "ssoSessionMaxLifespan": 31536000,
+  "ssoSessionIdleTimeoutRememberMe": 2592000,
+  "ssoSessionMaxLifespanRememberMe": 31536000,
+  "revokeRefreshToken": false,
+
+  "smtpServer": {
+    "host": "${SAUSAGE_SMTP_HOST:}",
+    "port": "${SAUSAGE_SMTP_PORT:587}",
+    "from": "${SAUSAGE_MAIL_FROM_ADDRESS:noreply@wurst-weiser.de}",
+    "fromDisplayName": "Wurst Weiser",
+    "auth": "true",
+    "starttls": "true",
+    "ssl": "false",
+    "user": "${SAUSAGE_SMTP_USERNAME:}",
+    "password": "${SAUSAGE_SMTP_PASSWORD:}"
+  },
+
+  "clients": [
+    {
+      "clientId": "sausage-app",
+      "name": "Wurst Weiser (Web und App)",
+      "description": "Angular/Ionic-App, Browser und Capacitor (iOS/Android). Public Client mit PKCE.",
+      "enabled": true,
+      "publicClient": true,
+      "protocol": "openid-connect",
+      "standardFlowEnabled": true,
+      "implicitFlowEnabled": false,
+      "directAccessGrantsEnabled": false,
+      "serviceAccountsEnabled": false,
+      "frontchannelLogout": false,
+      "rootUrl": "https://www.wurst-weiser.de",
+      "baseUrl": "/",
+      "redirectUris": [
+        "https://www.wurst-weiser.de/*",
+        "de.wurstweiser.app:/*",
+        "http://localhost:4200/*",
+        "http://localhost:8100/*"
+      ],
+      "webOrigins": [
+        "https://www.wurst-weiser.de",
+        "capacitor://localhost",
+        "https://localhost",
+        "http://localhost:4200",
+        "http://localhost:8100"
+      ],
+      "attributes": {
+        "pkce.code.challenge.method": "S256",
+        "post.logout.redirect.uris": "https://www.wurst-weiser.de/*##de.wurstweiser.app:/*##http://localhost:4200/*##http://localhost:8100/*"
+      },
+      "protocolMappers": [
+        {
+          "name": "audience sausage-api",
+          "protocol": "openid-connect",
+          "protocolMapper": "oidc-audience-mapper",
+          "config": {
+            "included.custom.audience": "sausage-api",
+            "access.token.claim": "true",
+            "id.token.claim": "false",
+            "introspection.token.claim": "true"
+          }
+        }
+      ],
+      "fullScopeAllowed": false
+    },
+    {
+      "clientId": "sausage-cli",
+      "name": "Wurst Weiser (Kommandozeile)",
+      "description": "Skripte wie der OSM-Import: Anmeldung im Browser per Geräte-Code (Device Flow), Token für sausage-api.",
+      "enabled": true,
+      "publicClient": true,
+      "protocol": "openid-connect",
+      "standardFlowEnabled": false,
+      "implicitFlowEnabled": false,
+      "directAccessGrantsEnabled": false,
+      "serviceAccountsEnabled": false,
+      "fullScopeAllowed": false,
+      "attributes": {
+        "oauth2.device.authorization.grant.enabled": "true"
+      },
+      "protocolMappers": [
+        {
+          "name": "audience sausage-api",
+          "protocol": "openid-connect",
+          "protocolMapper": "oidc-audience-mapper",
+          "config": {
+            "included.custom.audience": "sausage-api",
+            "access.token.claim": "true",
+            "id.token.claim": "false",
+            "introspection.token.claim": "true"
+          }
+        }
+      ]
+    },
+    {
+      "clientId": "sausage-api-admin",
+      "name": "sausage-api (Admin-API)",
+      "description": "Dienstkonto der API: löscht Keycloak-Konten, wenn Nutzer ihr Konto löschen.",
+      "enabled": true,
+      "publicClient": false,
+      "clientAuthenticatorType": "client-secret",
+      "secret": "${SAUSAGE_API_ADMIN_CLIENT_SECRET}",
+      "protocol": "openid-connect",
+      "standardFlowEnabled": false,
+      "implicitFlowEnabled": false,
+      "directAccessGrantsEnabled": false,
+      "serviceAccountsEnabled": true,
+      "fullScopeAllowed": false,
+      "defaultClientScopes": [
+        "basic",
+        "roles",
+        "kc-admin-api"
+      ],
+      "optionalClientScopes": []
+    }
+  ],
+
+  "clientScopeMappings": {
+    "realm-management": [
+      {
+        "client": "sausage-api-admin",
+        "roles": [
+          "manage-users",
+          "view-users"
+        ]
+      }
+    ]
+  },
+
+  "users": [
+    {
+      "username": "service-account-sausage-api-admin",
+      "enabled": true,
+      "serviceAccountClientId": "sausage-api-admin",
+      "clientRoles": {
+        "realm-management": [
+          "manage-users",
+          "view-users"
+        ]
+      }
+    }
+  ],
+
+  "components": {
+    "org.keycloak.userprofile.UserProfileProvider": [
+      {
+        "providerId": "declarative-user-profile",
+        "subComponents": {},
+        "config": {
+          "kc.user.profile.config": [
+            "{\"unmanagedAttributePolicy\":\"ADMIN_VIEW\",\"attributes\":[{\"name\":\"username\",\"displayName\":\"Benutzername\",\"validations\":{\"length\":{\"min\":3,\"max\":50},\"pattern\":{\"pattern\":\"^[\\\\p{L}\\\\p{N}](?:[\\\\p{L}\\\\p{N} ._-]*[\\\\p{L}\\\\p{N}])?$\",\"error-message\":\"Nur Buchstaben, Ziffern, Leerzeichen, Punkt, Unterstrich und Bindestrich\"},\"up-username-not-idn-homograph\":{}},\"permissions\":{\"view\":[\"admin\",\"user\"],\"edit\":[\"admin\",\"user\"]},\"multivalued\":false},{\"name\":\"email\",\"displayName\":\"E-Mail\",\"validations\":{\"email\":{},\"length\":{\"max\":255}},\"required\":{\"roles\":[\"user\"]},\"permissions\":{\"view\":[\"admin\",\"user\"],\"edit\":[\"admin\",\"user\"]},\"multivalued\":false}],\"groups\":[]}"
+          ]
+        }
+      }
+    ]
+  }
+}
