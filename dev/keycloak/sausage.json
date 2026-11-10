@@ -34,8 +34,7 @@
   "ssoSessionMaxLifespan": 31536000,
   "ssoSessionIdleTimeoutRememberMe": 2592000,
   "ssoSessionMaxLifespanRememberMe": 31536000,
-  "revokeRefreshToken": true,
-  "refreshTokenMaxReuse": 0,
+  "revokeRefreshToken": false,
 
   "smtpServer": {
     "host": "${SAUSAGE_SMTP_HOST:}",
