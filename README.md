@@ -4,9 +4,14 @@ Springboot Applikation Backend
 ## Lokal starten
 
 ```bash
-docker compose up -d   # Postgres auf localhost:5432
+docker compose up -d   # Postgres auf localhost:5432, Keycloak (Anmeldung) auf localhost:8180
 ./mvnw spring-boot:run # Liquibase legt das Schema beim Start an
 ```
+
+Konten legt man über die Registrierung von Keycloak an (aus der App heraus oder unter
+http://localhost:8180/realms/sausage/account), Admin-Konsole: http://localhost:8180/admin (`admin`/`admin`).
+Damit Konto löschen und „überall abmelden“ auch Keycloak erreichen, `KEYCLOAK_ADMIN_CLIENT_SECRET` aus
+`docker-compose.yml` setzen; ohne Secret ändert die API nur ihre eigene Datenbank.
 
 Ohne docker compose, mit einer Wegwerf-Datenbank aus Docker (Testcontainers):
 
@@ -50,14 +55,14 @@ sausage-app macht dasselbe für die Web-App. Beide Repos deployen unabhängig vo
 |---|---|
 | `DB_URL` | `jdbc:postgresql://localhost:5432/sausage` |
 | `DB_USERNAME` / `DB_PASSWORD` | `sausage` / `sausage` |
-| `JWT_SECRET` | leer → zufälliger Schlüssel pro Start (Anmeldungen gehen bei Neustart verloren) – **in Produktion setzen** (mind. 32 Zeichen) |
+| `OIDC_ISSUER_URI` | `http://localhost:8180/realms/sausage` – Keycloak-Realm, dessen Tokens die API akzeptiert (Produktion `https://auth.robertegenolf.de/realms/sausage`) |
+| `OIDC_JWK_SET_URI` | leer → `<OIDC_ISSUER_URI>/protocol/openid-connect/certs`; im Cluster die interne Adresse |
+| `OIDC_AUDIENCE` | `sausage-api` – muss im `aud` des Tokens stehen |
+| `KEYCLOAK_ADMIN_URL` / `KEYCLOAK_REALM` | `http://localhost:8180` / `sausage` – Admin-API für Konto löschen und „überall abmelden“ |
+| `KEYCLOAK_ADMIN_CLIENT_ID` / `KEYCLOAK_ADMIN_CLIENT_SECRET` | `sausage-api-admin` / leer (ohne Secret wird Keycloak nicht angefasst) |
 | `TERMS_VERSION` | `2026-10-05` – bei jeder Änderung der Nutzungsbedingungen erhöhen |
 | `PUBLIC_URL` | leer (aus der Anfrage); öffentliche Adresse für absolute Foto-URLs, im Produktions-Setup `https://DOMAIN` |
 | `API_DOCS_ENABLED` | `true` (Swagger UI und `/v3/api-docs`; im Produktions-Setup `false`) |
-| `JWT_VALIDITY` | `P30D` |
-| `app.rate-limit.registrations-per-hour` | `10` Registrierungen pro IP und Stunde |
-| `app.rate-limit.failed-logins-per-15-minutes` | `10` Fehlversuche pro IP und Account, danach 429 bis zum Fensterende |
-| `app.rate-limit.failed-logins-per-ip-per-15-minutes` | `100` Fehlversuche pro IP über alle Accounts |
 | `app.rate-limit.writes-per-hour` | `200` Schreibzugriffe (Anlegen/Ändern/Löschen) pro User und Stunde |
 | `app.rate-limit.reports-per-hour` | `30` Meldungen pro IP und Stunde |
 | `CORS_ALLOWED_ORIGINS` | `http://localhost:8100,http://localhost:4200,capacitor://localhost,https://localhost,http://localhost:3000,http://localhost:5173` |
@@ -72,36 +77,33 @@ Die GitHub-Actions-CI (`.github/workflows/ci.yml`) führt `./mvnw verify` aus.
 
 ## API
 
-Lesende `GET`-Endpunkte sind öffentlich, alles andere braucht Anmeldung (Frontend: `regenolf/sausage-app`) – entweder per HTTP Basic Auth
-oder per JWT:
+Lesende `GET`-Endpunkte sind öffentlich, alles andere braucht ein Access Token von **Keycloak**
+(`Authorization: Bearer …`). Registrierung, Anmeldung, „Passwort vergessen“, Passwort ändern und der Schutz vor
+Passwort-Raten liegen bei Keycloak (Realm `sausage`, Konfiguration in kvm-infra `cluster/keycloak/`). Die App holt
+Tokens per Authorization Code + PKCE (Client `sausage-app`), Skripte per Geräte-Code (Client `sausage-cli`).
+
+Die API prüft Signatur, Ablauf, Aussteller (`OIDC_ISSUER_URI`) und Empfänger (`aud` = `sausage-api`). Beim ersten
+Request mit einem neuen Keycloak-Konto legt sie den Account der App an (Benutzername = Keycloak-Benutzername, bei
+Konflikt mit angehängter Zahl; reservierte Namen werden zu „nutzer“). Alte Accounts aus der Zeit vor Keycloak werden
+nur übernommen, wenn die E-Mail in Keycloak **bestätigt** ist. Rolle und Sperre kommen bei jeder Anfrage aus der
+Datenbank und wirken sofort; gesperrte Accounts dürfen nur noch ihre Daten exportieren und das Konto löschen.
 
 ```bash
-curl -X POST http://localhost:8080/api/auth/login -H 'Content-Type: application/json' \
-     -d '{"email":"ich@example.de","password":"geheim123"}'   # E-Mail oder Benutzername
-# {"token":"eyJ...","accessToken":"eyJ...","tokenType":"Bearer","expiresIn":3600}
-curl -H "Authorization: Bearer eyJ..." http://localhost:8080/api/users/me
+# Token für Tests von der Kommandozeile (Geräte-Code, Anmeldung im Browser)
+curl -s -d client_id=sausage-cli -d scope=openid http://localhost:8180/realms/sausage/protocol/openid-connect/auth/device
 ```
-
-Tokens sind `app.jwt.validity` lang gültig (Standard 30 Tage). Die API prüft bei jeder Anfrage gegen die
-Datenbank, ob das Token noch gilt: Eine Passwortänderung oder `POST /api/auth/logout-all` macht alle alten Tokens
-sofort ungültig, ebenso ein gesperrter oder gelöschter Account. Rollenänderungen wirken sofort.
 
 | Methode | Pfad | Beschreibung |
 |---|---|---|
-| `POST` | `/api/users` | Registrieren (`username`, `email`, `password`, `acceptTerms: true`) |
-| `POST` | `/api/auth/register` | Registrieren und direkt anmelden (`email`, `password`, `acceptTerms: true` = Nutzungsbedingungen akzeptiert und mindestens 16 Jahre – noch optional, bis die App es mitschickt –, `displayName` 3–50 Zeichen: Buchstaben, Ziffern, Leerzeichen, `.`, `_`, `-`; reservierte Namen wie „Admin“ sind gesperrt) → Token |
-| `POST` | `/api/auth/login` | Anmelden (`email` oder Benutzername, `password`) → Token |
-| `POST` | `/api/auth/token` | JWT holen bzw. verlängern (mit Basic Auth oder gültigem Token) 🔒 |
-| `POST` | `/api/auth/logout-all` | Auf allen Geräten abmelden (alle Tokens ungültig) 🔒 |
-| `GET` | `/api/users/me` | Eigenes Profil inkl. akzeptierter (`termsVersion`) und aktueller Version der Nutzungsbedingungen (`currentTermsVersion`) 🔒 |
-| `POST` | `/api/users/me/terms` | Aktuelle Nutzungsbedingungen akzeptieren (nach einer Änderung) 🔒 |
+| `GET` | `/api/users/me` | Eigenes Profil inkl. akzeptierter (`termsVersion`) und aktueller Version der Nutzungsbedingungen (`currentTermsVersion`); legt beim ersten Aufruf den Account an 🔒 |
+| `POST` | `/api/users/me/terms` | Aktuelle Nutzungsbedingungen akzeptieren (nach dem ersten Login und nach Änderungen) 🔒 |
+| `POST` | `/api/users/me/logout-all` | Auf allen Geräten abmelden (beendet alle Keycloak-Sitzungen) 🔒 |
 | `GET` | `/api/users/me/spots` | Eigene Spots, neueste zuerst 🔒 |
 | `GET` | `/api/users/me/blocks` | Von mir blockierte Nutzer 🔒 |
 | `POST` | `/api/users/me/blocks` | Nutzer blockieren `{"username":…}`: seine Bewertungen, Kommentare und Fotos werden für mich ausgeblendet 🔒 |
 | `DELETE` | `/api/users/me/blocks/{username}` | Blockierung aufheben 🔒 |
-| `GET` | `/api/users/me/export` | Alle eigenen Daten als JSON-Datei (Auskunft/Datenübertragbarkeit, Art. 15/20 DSGVO) 🔒 |
-| `DELETE` | `/api/users/me` | Account löschen (Body `{"password":…}`): Bewertungen, Kommentare, Fotos werden gelöscht, eigene Spots anonymisiert 🔒 |
-| `PUT` | `/api/users/me/password` | Passwort ändern (`currentPassword`, `newPassword`); meldet alle anderen Geräte ab und liefert ein neues Token 🔒 |
+| `GET` | `/api/users/me/export` | Alle eigenen Daten als JSON-Datei (Auskunft/Datenübertragbarkeit, Art. 15/20 DSGVO), auch für gesperrte Konten 🔒 |
+| `DELETE` | `/api/users/me` | Konto löschen, in Keycloak und in der App: Bewertungen, Kommentare, Fotos werden gelöscht, eigene Spots anonymisiert; auch für gesperrte Konten 🔒 |
 | `GET` | `/api/categories` | Alle Kategorien |
 | `POST` | `/api/categories` | Kategorie anlegen 🔒 (nur Admin) |
 | `GET` | `/api/spots?category=&q=&page=&size=` | Spots als Liste, Suche in Name/Stadt; mit `size` seitenweise, Gesamtzahl im Header `X-Total-Count` |
@@ -134,22 +136,10 @@ auf https://www.openstreetmap.org/copyright anzeigen (Lizenz ODbL).
 Fehler kommen als [Problem Details](https://www.rfc-editor.org/rfc/rfc9457) (`application/problem+json`) mit
 deutscher Meldung in `detail`; bei Validierungsfehlern stehen die betroffenen Felder in `errors`.
 
-### Passwort vergessen
+### E-Mails
 
-| Methode | Pfad | Beschreibung |
-|---|---|---|
-| `POST` | `/api/auth/password-reset` | `{"email":"…"}` → immer 204; ist die Adresse registriert, kommt ein Link `…/reset-password?token=…` (60 Minuten gültig, einmal verwendbar, gespeichert nur als SHA-256-Hash). Limit pro IP und pro Adresse |
-| `POST` | `/api/auth/password-reset/confirm` | `{"token":"…","newPassword":"…"}` → 204, alle bisherigen Anmeldungen werden ungültig; 400 bei ungültigem/abgelaufenem Link |
-
-E-Mails gehen per SMTP raus (`SPRING_MAIL_HOST`, `_PORT`, `_USERNAME`, `_PASSWORD`, Absender `MAIL_FROM`); ohne
-`SPRING_MAIL_HOST` werden sie nur ins Log geschrieben. Links zeigen auf `FRONTEND_URL` bzw. `PUBLIC_URL`.
-
-### Datenschutz ohne Anmeldung (gesperrte Konten)
-
-| Methode | Pfad | Beschreibung |
-|---|---|---|
-| `POST` | `/api/auth/data/export` | `{"login":"…","password":"…"}` → alle eigenen Daten als JSON-Datei, auch für gesperrte Konten (Art. 15/20 DSGVO); gedrosselt wie der Login |
-| `POST` | `/api/auth/data/delete` | `{"login":"…","password":"…"}` → 204, Konto gelöscht (Art. 17 DSGVO) |
+Moderations-Mails verschickt die API per SMTP (`SPRING_MAIL_HOST`, `_PORT`, `_USERNAME`, `_PASSWORD`, Absender
+`MAIL_FROM`); ohne `SPRING_MAIL_HOST` werden sie nur ins Log geschrieben. Mails zu Konto und Passwort verschickt Keycloak.
 
 ### Suchmaschinen und Link-Vorschauen
 
@@ -169,7 +159,7 @@ Absolute Adressen kommen aus `PUBLIC_URL` oder aus `X-Forwarded-Proto`/`Host`.
 | `GET` | `/api/admin/reports?status=OPEN` | Meldungen mit Vorschau des Inhalts (`OPEN`, `REMOVED`, `REJECTED`, `ALL`) 🔒 Admin |
 | `PUT` | `/api/admin/reports/{id}` | Entscheiden: `{"decision":"REMOVED"\|"REJECTED","note":"Begründung"}`; REMOVED löscht den Inhalt und erledigt alle offenen Meldungen dazu 🔒 Admin |
 | `GET` | `/api/admin/users?status=DISABLED&q=…` | Accounts suchen (`ENABLED`, `DISABLED`, `ALL`; `q` in Benutzername und E-Mail, max. 100 Treffer), z. B. gesperrte zum Entsperren 🔒 Admin |
-| `PUT` | `/api/admin/users/{username}/status` | Account sperren/entsperren `{"enabled":false}`; Tokens werden sofort ungültig 🔒 Admin |
+| `PUT` | `/api/admin/users/{username}/status` | Account sperren/entsperren `{"enabled":false}`; wirkt sofort, auch für bereits ausgestellte Tokens 🔒 Admin |
 
 Admins dürfen außerdem fremde Spots bearbeiten und löschen sowie Bewertungen, Kommentare und Fotos löschen.
 | `GET` | `/api/users/me/moderation-decisions` | Entfernte eigene Inhalte mit Grund, Begründung und gesichertem Auszug (DSA Art. 17) 🔒 |
@@ -193,6 +183,10 @@ API_URL=https://www.wurst-weiser.de tools/osm-import/osm-import.sh --apply   # i
 REGION=europe/germany/thueringen API_URL=… tools/osm-import/osm-import.sh  # nur ein Bundesland
 PBF=~/Downloads/germany-latest.osm.pbf API_URL=… tools/osm-import/osm-import.sh   # vorhandene Datei statt Download
 ```
+
+Vor dem Hochladen fragt das Skript nach der Anmeldung: Es zeigt einen Link mit Geräte-Code, im Browser meldet man
+sich als Admin der App an und stimmt zu (Keycloak-Client `sausage-cli`). Alternativ ein fertiges Token in
+`ACCESS_TOKEN` übergeben.
 
 Für ganz Deutschland braucht der Lauf je nach Rechner 10–20 Minuten, rund 10 GB freien Platz im `WORKDIR` und
 einige GB RAM für `osmium`. Der Download wird wiederverwendet (nur neu geladen, wenn Geofabrik eine neuere Datei hat).

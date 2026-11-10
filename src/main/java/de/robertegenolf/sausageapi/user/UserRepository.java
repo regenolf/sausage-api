@@ -1,16 +1,22 @@
 package de.robertegenolf.sausageapi.user;
 
+import org.springframework.jdbc.core.RowMapper;
 import org.springframework.jdbc.core.simple.JdbcClient;
 import org.springframework.stereotype.Repository;
+import org.springframework.transaction.annotation.Transactional;
 
 import java.time.Instant;
 import java.util.Optional;
 
+/**
+ * Accounts der App. Angemeldet wird über Keycloak; {@code external_id} ist die Keycloak-User-ID ({@code sub}).
+ * Benutzername, Rolle und Sperre verwaltet weiterhin die App (siehe {@link AccountLinker}).
+ */
 @Repository
 public class UserRepository {
 
-	/** {@code createdAt}: Zeitpunkt der Registrierung – ältere Tokens können nicht zu diesem Account gehören. */
-	public record StoredUser(long id, String username, String passwordHash, String role, int tokenVersion,
+	/** {@code externalId}: Keycloak-User-ID, {@code null} bei alten Accounts aus der Zeit vor Keycloak. */
+	public record StoredUser(long id, String username, String email, String role, boolean enabled, String externalId,
 			Instant createdAt) {
 	}
 
@@ -22,7 +28,7 @@ public class UserRepository {
 			String termsVersion, Instant termsAcceptedAt, String currentTermsVersion) {
 	}
 
-	/** Account aus Sicht der Moderation (ohne Passwort-Hash). */
+	/** Account aus Sicht der Moderation. */
 	public record AdminUser(String username, String email, String role, boolean enabled, Instant createdAt) {
 	}
 
@@ -31,12 +37,10 @@ public class UserRepository {
 
 	/**
 	 * Erlaubt sind Buchstaben, Ziffern, Leerzeichen, Punkt, Unterstrich und Bindestrich; Anfang und Ende müssen
-	 * Buchstabe oder Ziffer sein. Damit ist der Name kein E-Mail-Login ("@"), bricht Basic Auth nicht (":") und ist
-	 * als Pfadsegment (z. B. Admin-Sperre) nutzbar.
+	 * Buchstabe oder Ziffer sein. Damit ist der Name als Pfadsegment (z. B. Admin-Sperre) nutzbar. Keycloak prüft
+	 * bei der Registrierung dasselbe Muster (Realm-Datei in kvm-infra).
 	 */
 	public static final String USERNAME_PATTERN = "[\\p{L}\\p{N}](?:[\\p{L}\\p{N} ._-]*[\\p{L}\\p{N}])?";
-
-	public static final String TERMS_MESSAGE = "Bitte die Nutzungsbedingungen akzeptieren und bestätigen, dass du mindestens 16 Jahre alt bist";
 
 	public static final String USERNAME_MESSAGE = "nur Buchstaben, Ziffern, Leerzeichen, Punkt, Unterstrich und Bindestrich";
 
@@ -51,8 +55,8 @@ public class UserRepository {
 	private static final java.util.regex.Pattern USERNAME_REGEX = java.util.regex.Pattern.compile(USERNAME_PATTERN);
 
 	/**
-	 * Prüft den bereits normalisierten Namen erneut: NFKC kann Zeichen vervielfachen (z. B. U+FDFA → 18 Zeichen)
-	 * oder in nicht erlaubte umwandeln (½ → 1⁄2), die Bean-Validation sieht aber nur die Eingabe.
+	 * Prüft den bereits normalisierten Namen: NFKC kann Zeichen vervielfachen (z. B. U+FDFA → 18 Zeichen) oder in
+	 * nicht erlaubte umwandeln (½ → 1⁄2).
 	 */
 	public static boolean isValidNormalizedUsername(String username) {
 		return username.length() >= 3 && username.length() <= 50 && USERNAME_REGEX.matcher(username).matches();
@@ -63,41 +67,90 @@ public class UserRepository {
 		return RESERVED_USERNAMES.contains(username.toLowerCase(java.util.Locale.ROOT).replaceAll("[ ._-]", ""));
 	}
 
+	private static final String USER_COLUMNS = "id, username, email, role, enabled, external_id, created_at";
+
+	private static final RowMapper<StoredUser> USER_MAPPER = (rs, n) -> new StoredUser(rs.getLong("id"),
+			rs.getString("username"), rs.getString("email"), rs.getString("role"), rs.getBoolean("enabled"),
+			rs.getString("external_id"), rs.getTimestamp("created_at").toInstant());
+
 	private final JdbcClient jdbc;
 
 	UserRepository(JdbcClient jdbc) {
 		this.jdbc = jdbc;
 	}
 
+	/** Aktiver Account mit diesem Benutzernamen. */
 	public Optional<StoredUser> findByUsername(String username) {
-		return jdbc.sql("SELECT id, username, password_hash, role, token_version, created_at FROM app_user WHERE username = :username AND enabled")
+		return jdbc.sql("SELECT " + USER_COLUMNS + " FROM app_user WHERE username = :username AND enabled")
 				.param("username", username)
-				.query((rs, n) -> new StoredUser(rs.getLong("id"), rs.getString("username"),
-						rs.getString("password_hash"), rs.getString("role"), rs.getInt("token_version"),
-						rs.getTimestamp("created_at").toInstant()))
+				.query(USER_MAPPER)
 				.optional();
 	}
 
-	/**
-	 * Enthält {@code login} ein "@", wird per E-Mail gesucht (Groß-/Kleinschreibung egal), sonst per Benutzername.
-	 * Da Benutzernamen kein "@" enthalten dürfen, kann ein fremder Account den E-Mail-Login nicht überdecken.
-	 */
-	public Optional<StoredUser> findByLogin(String login) {
-		return findByLogin(login, false);
+	/** Auch gesperrte Accounts – nur für DSGVO-Export und Kontolöschung. */
+	Optional<StoredUser> findByUsernameIncludingDisabled(String username) {
+		return jdbc.sql("SELECT " + USER_COLUMNS + " FROM app_user WHERE username = :username")
+				.param("username", username)
+				.query(USER_MAPPER)
+				.optional();
 	}
 
-	/** Wie {@link #findByLogin(String)}, auf Wunsch auch gesperrte Accounts (nur für DSGVO-Export und -Löschung). */
-	Optional<StoredUser> findByLogin(String login, boolean includeDisabled) {
-		String where = login.contains("@") ? "lower(email) = lower(:login)" : "username = :login";
+	/** Account zur Keycloak-User-ID, auch gesperrt (die Sperre wertet die Anmeldung aus). */
+	public Optional<StoredUser> findByExternalId(String externalId) {
+		return jdbc.sql("SELECT " + USER_COLUMNS + " FROM app_user WHERE external_id = :externalId")
+				.param("externalId", externalId)
+				.query(USER_MAPPER)
+				.optional();
+	}
+
+	/** Alter Account (vor Keycloak) mit dieser E-Mail, Groß-/Kleinschreibung egal. */
+	Optional<StoredUser> findUnlinkedByEmail(String email) {
+		return jdbc.sql("SELECT " + USER_COLUMNS + " FROM app_user WHERE lower(email) = lower(:email) AND external_id IS NULL")
+				.param("email", email)
+				.query(USER_MAPPER)
+				.optional();
+	}
+
+	boolean emailTaken(String email) {
+		return jdbc.sql("SELECT EXISTS (SELECT 1 FROM app_user WHERE lower(email) = lower(:email))")
+				.param("email", email)
+				.query(Boolean.class)
+				.single();
+	}
+
+	boolean usernameTaken(String username) {
+		return jdbc.sql("SELECT EXISTS (SELECT 1 FROM app_user WHERE lower(username) = lower(:username))")
+				.param("username", username)
+				.query(Boolean.class)
+				.single();
+	}
+
+	void linkExternalId(long id, String externalId) {
+		jdbc.sql("UPDATE app_user SET external_id = :externalId WHERE id = :id AND external_id IS NULL")
+				.param("externalId", externalId)
+				.param("id", id)
+				.update();
+	}
+
+	/** Legt den Account zu einem Keycloak-Konto an (Nutzungsbedingungen noch nicht akzeptiert). */
+	long createExternal(String externalId, String username, String email) {
 		return jdbc.sql("""
-				SELECT id, username, password_hash, role, token_version, created_at FROM app_user
-				WHERE %s%s
-				""".formatted(where, includeDisabled ? "" : " AND enabled"))
-				.param("login", login)
-				.query((rs, n) -> new StoredUser(rs.getLong("id"), rs.getString("username"),
-						rs.getString("password_hash"), rs.getString("role"), rs.getInt("token_version"),
-						rs.getTimestamp("created_at").toInstant()))
-				.optional();
+				INSERT INTO app_user (external_id, username, email)
+				VALUES (:externalId, :username, :email)
+				RETURNING id
+				""")
+				.param("externalId", externalId)
+				.param("username", username)
+				.param("email", email)
+				.query(Long.class)
+				.single();
+	}
+
+	void updateEmail(long id, String email) {
+		jdbc.sql("UPDATE app_user SET email = :email WHERE id = :id")
+				.param("email", email)
+				.param("id", id)
+				.update();
 	}
 
 	Optional<UserProfile> findProfile(String username, String currentTermsVersion) {
@@ -123,24 +176,12 @@ public class UserRepository {
 				.update();
 	}
 
-	/** Setzt ein neues Passwort und macht damit alle bisher ausgestellten Tokens ungültig. */
-	void updatePasswordHash(long id, String passwordHash) {
-		jdbc.sql("UPDATE app_user SET password_hash = :passwordHash, token_version = token_version + 1 WHERE id = :id")
-				.param("passwordHash", passwordHash)
-				.param("id", id)
-				.update();
-	}
-
-	/** Macht alle bisher ausgestellten Tokens des Users ungültig ("überall abmelden"). */
-	public void incrementTokenVersion(long id) {
-		jdbc.sql("UPDATE app_user SET token_version = token_version + 1 WHERE id = :id")
-				.param("id", id)
-				.update();
-	}
-
-	/** Sperrt/entsperrt einen Account; alte Tokens werden dabei ungültig. Liefert false, wenn es ihn nicht gibt. */
+	/**
+	 * Sperrt/entsperrt einen Account. Wirkt sofort: Die Anmeldung prüft die Sperre bei jeder Anfrage. Liefert false,
+	 * wenn es ihn nicht gibt.
+	 */
 	public boolean setEnabled(String username, boolean enabled) {
-		return jdbc.sql("UPDATE app_user SET enabled = :enabled, token_version = token_version + 1 WHERE username = :username")
+		return jdbc.sql("UPDATE app_user SET enabled = :enabled WHERE username = :username")
 				.param("enabled", enabled)
 				.param("username", username)
 				.update() > 0;
@@ -175,25 +216,34 @@ public class UserRepository {
 		return jdbc.sql("SELECT email FROM app_user WHERE id = :id").param("id", id).query(String.class).optional();
 	}
 
-	void delete(long id) {
+	/**
+	 * Löscht den Account. Die Keycloak-ID bleibt eine Stunde gesperrt: Access Tokens gelten bis zu 5 Minuten weiter
+	 * und würden sonst sofort einen neuen, leeren Account anlegen.
+	 */
+	@Transactional
+	void delete(StoredUser user) {
 		jdbc.sql("DELETE FROM app_user WHERE id = :id")
-				.param("id", id)
+				.param("id", user.id())
 				.update();
+		if (user.externalId() != null) {
+			jdbc.sql("DELETE FROM deleted_account WHERE deleted_at < CURRENT_TIMESTAMP - INTERVAL '1 hour'").update();
+			jdbc.sql("""
+					INSERT INTO deleted_account (external_id) VALUES (:externalId)
+					ON CONFLICT (external_id) DO UPDATE SET deleted_at = CURRENT_TIMESTAMP
+					""")
+					.param("externalId", user.externalId())
+					.update();
+		}
 	}
 
-	/** Legt einen Account an; {@code termsVersion} ist die akzeptierte Version der Nutzungsbedingungen (null = nicht akzeptiert). */
-	public long create(String username, String email, String passwordHash, String termsVersion) {
+	/** Wurde das Keycloak-Konto in der letzten Stunde hier gelöscht? */
+	boolean recentlyDeleted(String externalId) {
 		return jdbc.sql("""
-				INSERT INTO app_user (username, email, password_hash, terms_version, terms_accepted_at)
-				VALUES (:username, :email, :passwordHash, CAST(:termsVersion AS varchar),
-				        CASE WHEN CAST(:termsVersion AS varchar) IS NULL THEN NULL ELSE CURRENT_TIMESTAMP END)
-				RETURNING id
+				SELECT EXISTS (SELECT 1 FROM deleted_account
+				               WHERE external_id = :externalId AND deleted_at > CURRENT_TIMESTAMP - INTERVAL '1 hour')
 				""")
-				.param("username", username)
-				.param("email", email)
-				.param("passwordHash", passwordHash)
-				.param("termsVersion", termsVersion)
-				.query(Long.class)
+				.param("externalId", externalId)
+				.query(Boolean.class)
 				.single();
 	}
 }

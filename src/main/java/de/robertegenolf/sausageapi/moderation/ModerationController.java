@@ -5,7 +5,7 @@ import de.robertegenolf.sausageapi.moderation.ReportRepository.Status;
 import de.robertegenolf.sausageapi.moderation.ReportRepository.StoredReport;
 import de.robertegenolf.sausageapi.moderation.ReportRepository.Target;
 import de.robertegenolf.sausageapi.moderation.ReportRepository.TargetType;
-import de.robertegenolf.sausageapi.security.LoginThrottle;
+import de.robertegenolf.sausageapi.security.RequestThrottle;
 import de.robertegenolf.sausageapi.user.UserRepository;
 import jakarta.servlet.http.HttpServletRequest;
 import jakarta.validation.Valid;
@@ -74,10 +74,10 @@ class ModerationController {
 
 	private final ReportRepository reports;
 	private final UserRepository users;
-	private final LoginThrottle throttle;
+	private final RequestThrottle throttle;
 	private final ModerationNotifier notifier;
 
-	ModerationController(ReportRepository reports, UserRepository users, LoginThrottle throttle,
+	ModerationController(ReportRepository reports, UserRepository users, RequestThrottle throttle,
 			ModerationNotifier notifier) {
 		this.reports = reports;
 		this.users = users;

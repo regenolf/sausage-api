@@ -1,6 +1,7 @@
 package de.robertegenolf.sausageapi.moderation;
 
 import com.jayway.jsonpath.JsonPath;
+import de.robertegenolf.sausageapi.TestSecurityConfiguration;
 import de.robertegenolf.sausageapi.TestcontainersConfiguration;
 import de.robertegenolf.sausageapi.mail.Mailer;
 import org.junit.jupiter.api.Test;
@@ -17,7 +18,7 @@ import java.util.UUID;
 
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.verify;
-import static org.springframework.security.test.web.servlet.request.SecurityMockMvcRequestPostProcessors.httpBasic;
+import static de.robertegenolf.sausageapi.TestTokens.login;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.put;
@@ -25,14 +26,10 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
 /** Melde- und Abhilfeverfahren (DSA Art. 16) und Admin-Moderation. */
-@SpringBootTest(properties = {"app.rate-limit.registrations-per-hour=10000",
-		"app.rate-limit.failed-logins-per-15-minutes=10000",
-		"app.rate-limit.failed-logins-per-ip-per-15-minutes=10000", "app.rate-limit.writes-per-hour=10000"})
+@SpringBootTest(properties = "app.rate-limit.writes-per-hour=10000")
 @AutoConfigureMockMvc
-@Import(TestcontainersConfiguration.class)
+@Import({TestcontainersConfiguration.class, TestSecurityConfiguration.class})
 class ModerationTests {
-
-	private static final String PASSWORD = "geheimesPasswort";
 
 	@Autowired
 	private MockMvc mvc;
@@ -57,7 +54,7 @@ class ModerationTests {
 				.andExpect(status().isCreated())
 				.andExpect(jsonPath("$.status").value("OPEN"));
 		String reporter = register();
-		mvc.perform(post("/api/reports").with(httpBasic(reporter, PASSWORD)).contentType(MediaType.APPLICATION_JSON)
+		mvc.perform(post("/api/reports").with(login(reporter)).contentType(MediaType.APPLICATION_JSON)
 						.content(report("SPOT", spotId, "WRONG_INFO", null)))
 				.andExpect(status().isCreated());
 
@@ -77,28 +74,28 @@ class ModerationTests {
 		String admin = register();
 		jdbc.sql("UPDATE app_user SET role = 'ADMIN' WHERE username = :u").param("u", admin).update();
 		long spotId = createSpot(author);
-		String location = mvc.perform(post("/api/spots/" + spotId + "/comments").with(httpBasic(author, PASSWORD))
+		String location = mvc.perform(post("/api/spots/" + spotId + "/comments").with(login(author))
 						.contentType(MediaType.APPLICATION_JSON).content("{\"text\":\"Beleidigung " + author + "\"}"))
 				.andReturn().getResponse().getHeader("Location");
 		long commentId = Long.parseLong(location.substring(location.lastIndexOf('/') + 1));
 
-		long first = reportId(mvc.perform(post("/api/reports").with(httpBasic(reporter, PASSWORD))
+		long first = reportId(mvc.perform(post("/api/reports").with(login(reporter))
 				.contentType(MediaType.APPLICATION_JSON).content(report("COMMENT", commentId, "INSULT", null)))
 				.andExpect(status().isCreated()).andReturn().getResponse().getContentAsString());
 		long second = reportId(mvc.perform(post("/api/reports").contentType(MediaType.APPLICATION_JSON)
 				.content(report("COMMENT", commentId, "ILLEGAL", "zweiter@test.de")))
 				.andReturn().getResponse().getContentAsString());
-		long spotReport = reportId(mvc.perform(post("/api/reports").with(httpBasic(reporter, PASSWORD))
+		long spotReport = reportId(mvc.perform(post("/api/reports").with(login(reporter))
 				.contentType(MediaType.APPLICATION_JSON).content(report("SPOT", spotId, "WRONG_INFO", null)))
 				.andReturn().getResponse().getContentAsString());
 
 		mvc.perform(get("/api/admin/reports")).andExpect(status().isUnauthorized());
-		mvc.perform(get("/api/admin/reports").with(httpBasic(other, PASSWORD))).andExpect(status().isForbidden());
-		mvc.perform(put("/api/admin/reports/" + first).with(httpBasic(other, PASSWORD))
+		mvc.perform(get("/api/admin/reports").with(login(other))).andExpect(status().isForbidden());
+		mvc.perform(put("/api/admin/reports/" + first).with(login(other))
 						.contentType(MediaType.APPLICATION_JSON).content("{\"decision\":\"REMOVED\"}"))
 				.andExpect(status().isForbidden());
 
-		mvc.perform(get("/api/admin/reports").with(httpBasic(admin, PASSWORD)))
+		mvc.perform(get("/api/admin/reports").with(login(admin)))
 				.andExpect(status().isOk())
 				.andExpect(jsonPath("$[?(@.id == " + first + ")].author").value(author))
 				.andExpect(jsonPath("$[?(@.id == " + first + ")].contentPreview").value("Beleidigung " + author))
@@ -106,7 +103,7 @@ class ModerationTests {
 				.andExpect(jsonPath("$[?(@.id == " + second + ")].reporterEmail").value("zweiter@test.de"));
 
 		// Entfernen löscht den Kommentar und erledigt beide Meldungen dazu
-		mvc.perform(put("/api/admin/reports/" + first).with(httpBasic(admin, PASSWORD))
+		mvc.perform(put("/api/admin/reports/" + first).with(login(admin))
 						.contentType(MediaType.APPLICATION_JSON)
 						.content("{\"decision\":\"REMOVED\",\"note\":\"Beleidigung entfernt\"}"))
 				.andExpect(status().isOk())
@@ -116,19 +113,19 @@ class ModerationTests {
 				.andExpect(jsonPath("$.contentDeleted").value(true))
 				.andExpect(jsonPath("$.contentPreview").value("Beleidigung " + author));
 		mvc.perform(get("/api/spots/" + spotId + "/comments")).andExpect(jsonPath("$").isEmpty());
-		mvc.perform(get("/api/admin/reports").param("status", "ALL").with(httpBasic(admin, PASSWORD)))
+		mvc.perform(get("/api/admin/reports").param("status", "ALL").with(login(admin)))
 				.andExpect(jsonPath("$[?(@.id == " + second + ")].status").value("REMOVED"));
-		mvc.perform(put("/api/admin/reports/" + second).with(httpBasic(admin, PASSWORD))
+		mvc.perform(put("/api/admin/reports/" + second).with(login(admin))
 						.contentType(MediaType.APPLICATION_JSON).content("{\"decision\":\"REJECTED\"}"))
 				.andExpect(status().isConflict());
 
 		// Ablehnen lässt den Inhalt stehen; der Melder sieht die Entscheidung
-		mvc.perform(put("/api/admin/reports/" + spotReport).with(httpBasic(admin, PASSWORD))
+		mvc.perform(put("/api/admin/reports/" + spotReport).with(login(admin))
 						.contentType(MediaType.APPLICATION_JSON)
 						.content("{\"decision\":\"REJECTED\",\"note\":\"Angaben sind korrekt\"}"))
 				.andExpect(status().isOk());
 		mvc.perform(get("/api/spots/" + spotId)).andExpect(status().isOk());
-		mvc.perform(get("/api/users/me/reports").with(httpBasic(reporter, PASSWORD)))
+		mvc.perform(get("/api/users/me/reports").with(login(reporter)))
 				.andExpect(status().isOk())
 				.andExpect(jsonPath("$.length()").value(2))
 				.andExpect(jsonPath("$[?(@.id == " + spotReport + ")].decisionNote").value("Angaben sind korrekt"))
@@ -142,28 +139,28 @@ class ModerationTests {
 		String admin = register();
 		jdbc.sql("UPDATE app_user SET role = 'ADMIN' WHERE username = :u").param("u", admin).update();
 		long spotId = createSpot(author);
-		String location = mvc.perform(post("/api/spots/" + spotId + "/comments").with(httpBasic(author, PASSWORD))
+		String location = mvc.perform(post("/api/spots/" + spotId + "/comments").with(login(author))
 						.contentType(MediaType.APPLICATION_JSON).content("{\"text\":\"Werbung\"}"))
 				.andReturn().getResponse().getHeader("Location");
 		long commentId = Long.parseLong(location.substring(location.lastIndexOf('/') + 1));
 
 		// Angemeldet: eine zusätzlich angegebene E-Mail wird nicht gespeichert
-		long commentReport = reportId(mvc.perform(post("/api/reports").with(httpBasic(reporter, PASSWORD))
+		long commentReport = reportId(mvc.perform(post("/api/reports").with(login(reporter))
 				.contentType(MediaType.APPLICATION_JSON).content(report("COMMENT", commentId, "SPAM", "privat@test.de")))
 				.andExpect(status().isCreated()).andReturn().getResponse().getContentAsString());
-		long spotReport = reportId(mvc.perform(post("/api/reports").with(httpBasic(reporter, PASSWORD))
+		long spotReport = reportId(mvc.perform(post("/api/reports").with(login(reporter))
 				.contentType(MediaType.APPLICATION_JSON).content(report("SPOT", spotId, "ILLEGAL", null)))
 				.andExpect(status().isCreated()).andReturn().getResponse().getContentAsString());
-		mvc.perform(get("/api/admin/reports").with(httpBasic(admin, PASSWORD)))
+		mvc.perform(get("/api/admin/reports").with(login(admin)))
 				.andExpect(jsonPath("$[?(@.id == " + commentReport + ")].reporterEmail").value(org.hamcrest.Matchers.contains(org.hamcrest.Matchers.nullValue())));
 
-		mvc.perform(put("/api/admin/reports/" + spotReport).with(httpBasic(admin, PASSWORD))
+		mvc.perform(put("/api/admin/reports/" + spotReport).with(login(admin))
 						.contentType(MediaType.APPLICATION_JSON).content("{\"decision\":\"REMOVED\"}"))
 				.andExpect(status().isOk());
-		mvc.perform(get("/api/users/me/reports").with(httpBasic(reporter, PASSWORD)))
+		mvc.perform(get("/api/users/me/reports").with(login(reporter)))
 				.andExpect(jsonPath("$[?(@.id == " + commentReport + ")].status").value("REMOVED"))
 				.andExpect(jsonPath("$[?(@.id == " + spotReport + ")].status").value("REMOVED"));
-		mvc.perform(put("/api/admin/reports/" + commentReport).with(httpBasic(admin, PASSWORD))
+		mvc.perform(put("/api/admin/reports/" + commentReport).with(login(admin))
 						.contentType(MediaType.APPLICATION_JSON).content("{\"decision\":\"REJECTED\"}"))
 				.andExpect(status().isConflict());
 	}
@@ -175,15 +172,15 @@ class ModerationTests {
 		String admin = register();
 		jdbc.sql("UPDATE app_user SET role = 'ADMIN' WHERE username = :u").param("u", admin).update();
 		long spotId = createSpot(author);
-		String location = mvc.perform(post("/api/spots/" + spotId + "/comments").with(httpBasic(author, PASSWORD))
+		String location = mvc.perform(post("/api/spots/" + spotId + "/comments").with(login(author))
 						.contentType(MediaType.APPLICATION_JSON).content("{\"text\":\"Gemeiner Kommentar\"}"))
 				.andReturn().getResponse().getHeader("Location");
 		long commentId = Long.parseLong(location.substring(location.lastIndexOf('/') + 1));
-		long reportId = reportId(mvc.perform(post("/api/reports").with(httpBasic(reporter, PASSWORD))
+		long reportId = reportId(mvc.perform(post("/api/reports").with(login(reporter))
 				.contentType(MediaType.APPLICATION_JSON).content(report("COMMENT", commentId, "INSULT", null)))
 				.andExpect(status().isCreated()).andReturn().getResponse().getContentAsString());
 
-		mvc.perform(put("/api/admin/reports/" + reportId).with(httpBasic(admin, PASSWORD))
+		mvc.perform(put("/api/admin/reports/" + reportId).with(login(admin))
 						.contentType(MediaType.APPLICATION_JSON).content("{\"decision\":\"REMOVED\",\"note\":\"Beleidigung\"}"))
 				.andExpect(status().isOk())
 				// Inhalt ist gelöscht, der gesicherte Stand bleibt sichtbar
@@ -197,14 +194,14 @@ class ModerationTests {
 		verify(mailer).send(eq(author + "@test.de"), eq("Sausage: Ein Inhalt von dir wurde entfernt"),
 				org.mockito.ArgumentMatchers.contains("Begründung: Beleidigung"));
 
-		mvc.perform(get("/api/users/me/moderation-decisions").with(httpBasic(author, PASSWORD)))
+		mvc.perform(get("/api/users/me/moderation-decisions").with(login(author)))
 				.andExpect(status().isOk())
 				.andExpect(jsonPath("$[0].targetType").value("COMMENT"))
 				.andExpect(jsonPath("$[0].decisionNote").value("Beleidigung"))
 				.andExpect(jsonPath("$[0].contentSnapshot").value("Gemeiner Kommentar"));
-		mvc.perform(get("/api/users/me/moderation-decisions").with(httpBasic(reporter, PASSWORD)))
+		mvc.perform(get("/api/users/me/moderation-decisions").with(login(reporter)))
 				.andExpect(jsonPath("$.length()").value(0));
-		mvc.perform(get("/api/users/me/export").with(httpBasic(author, PASSWORD)))
+		mvc.perform(get("/api/users/me/export").with(login(author)))
 				.andExpect(jsonPath("$.meldungen_zu_eigenen_inhalten[0].inhalt").value("Gemeiner Kommentar"));
 	}
 
@@ -213,32 +210,29 @@ class ModerationTests {
 		String user = register();
 		String admin = register();
 		jdbc.sql("UPDATE app_user SET role = 'ADMIN' WHERE username = :u").param("u", admin).update();
-		String json = mvc.perform(post("/api/auth/login").contentType(MediaType.APPLICATION_JSON)
-						.content("{\"email\":\"" + user + "\",\"acceptTerms\":true,\"password\":\"" + PASSWORD + "\"}"))
-				.andReturn().getResponse().getContentAsString();
-		String token = JsonPath.read(json, "$.token");
 
-		mvc.perform(put("/api/admin/users/" + user + "/status").with(httpBasic(user, PASSWORD))
+		mvc.perform(put("/api/admin/users/" + user + "/status").with(login(user))
 						.contentType(MediaType.APPLICATION_JSON).content("{\"enabled\":false}"))
 				.andExpect(status().isForbidden());
-		mvc.perform(put("/api/admin/users/" + user + "/status").with(httpBasic(admin, PASSWORD))
+		mvc.perform(put("/api/admin/users/" + user + "/status").with(login(admin))
 						.contentType(MediaType.APPLICATION_JSON).content("{\"enabled\":false}"))
 				.andExpect(status().isNoContent());
-		mvc.perform(get("/api/users/me").header("Authorization", "Bearer " + token)).andExpect(status().isUnauthorized());
-		mvc.perform(get("/api/users/me").with(httpBasic(user, PASSWORD))).andExpect(status().isUnauthorized());
-		mvc.perform(post("/api/auth/login").contentType(MediaType.APPLICATION_JSON)
-						.content("{\"email\":\"" + user + "\",\"acceptTerms\":true,\"password\":\"" + PASSWORD + "\"}"))
-				.andExpect(status().isUnauthorized());
+		// Sperre wirkt sofort, auch mit noch gültigem Keycloak-Token (nur Export und Löschen bleiben möglich)
+		mvc.perform(get("/api/users/me").with(login(user))).andExpect(status().isForbidden());
+		mvc.perform(post("/api/spots/1/comments").with(login(user))
+						.contentType(MediaType.APPLICATION_JSON).content("{\"text\":\"gesperrt\"}"))
+				.andExpect(status().isForbidden());
+		mvc.perform(get("/api/users/me/export").with(login(user))).andExpect(status().isOk());
 
-		mvc.perform(put("/api/admin/users/" + user + "/status").with(httpBasic(admin, PASSWORD))
+		mvc.perform(put("/api/admin/users/" + user + "/status").with(login(admin))
 						.contentType(MediaType.APPLICATION_JSON).content("{\"enabled\":true}"))
 				.andExpect(status().isNoContent());
-		mvc.perform(get("/api/users/me").with(httpBasic(user, PASSWORD))).andExpect(status().isOk());
+		mvc.perform(get("/api/users/me").with(login(user))).andExpect(status().isOk());
 
-		mvc.perform(put("/api/admin/users/" + admin + "/status").with(httpBasic(admin, PASSWORD))
+		mvc.perform(put("/api/admin/users/" + admin + "/status").with(login(admin))
 						.contentType(MediaType.APPLICATION_JSON).content("{\"enabled\":false}"))
 				.andExpect(status().isBadRequest());
-		mvc.perform(put("/api/admin/users/niemand" + user + "/status").with(httpBasic(admin, PASSWORD))
+		mvc.perform(put("/api/admin/users/niemand" + user + "/status").with(login(admin))
 						.contentType(MediaType.APPLICATION_JSON).content("{\"enabled\":false}"))
 				.andExpect(status().isNotFound());
 	}
@@ -249,13 +243,13 @@ class ModerationTests {
 		String blocked = register();
 		String admin = register();
 		jdbc.sql("UPDATE app_user SET role = 'ADMIN' WHERE username = :u").param("u", admin).update();
-		mvc.perform(put("/api/admin/users/" + blocked + "/status").with(httpBasic(admin, PASSWORD))
+		mvc.perform(put("/api/admin/users/" + blocked + "/status").with(login(admin))
 						.contentType(MediaType.APPLICATION_JSON).content("{\"enabled\":false}"))
 				.andExpect(status().isNoContent());
 
-		mvc.perform(get("/api/admin/users").with(httpBasic(user, PASSWORD))).andExpect(status().isForbidden());
+		mvc.perform(get("/api/admin/users").with(login(user))).andExpect(status().isForbidden());
 		mvc.perform(get("/api/admin/users").param("status", "DISABLED").param("q", blocked.toUpperCase())
-						.with(httpBasic(admin, PASSWORD)))
+						.with(login(admin)))
 				.andExpect(status().isOk())
 				.andExpect(jsonPath("$.length()").value(1))
 				.andExpect(jsonPath("$[0].username").value(blocked))
@@ -263,27 +257,27 @@ class ModerationTests {
 				.andExpect(jsonPath("$[0].enabled").value(false))
 				.andExpect(jsonPath("$[0].passwordHash").doesNotExist());
 		mvc.perform(get("/api/admin/users").param("status", "ENABLED").param("q", blocked)
-						.with(httpBasic(admin, PASSWORD)))
+						.with(login(admin)))
 				.andExpect(jsonPath("$.length()").value(0));
 		// Suche nach E-Mail; "_" und "%" sind keine Platzhalter
-		mvc.perform(get("/api/admin/users").param("q", user + "@test").with(httpBasic(admin, PASSWORD)))
+		mvc.perform(get("/api/admin/users").param("q", user + "@test").with(login(admin)))
 				.andExpect(jsonPath("$[0].username").value(user));
-		mvc.perform(get("/api/admin/users").param("q", "%").with(httpBasic(admin, PASSWORD)))
+		mvc.perform(get("/api/admin/users").param("q", "%").with(login(admin)))
 				.andExpect(jsonPath("$.length()").value(0));
-		mvc.perform(get("/api/admin/users").param("status", "GESPERRT").with(httpBasic(admin, PASSWORD)))
+		mvc.perform(get("/api/admin/users").param("status", "GESPERRT").with(login(admin)))
 				.andExpect(status().isBadRequest());
 	}
 
+	/** Erster Login mit neuem Keycloak-Konto (legt den Account an) und Zustimmung zu den Nutzungsbedingungen. */
 	private String register() throws Exception {
 		String name = "m" + UUID.randomUUID().toString().substring(0, 8);
-		mvc.perform(post("/api/users").contentType(MediaType.APPLICATION_JSON)
-						.content("{\"username\":\"%s\",\"email\":\"%s@test.de\",\"acceptTerms\":true,\"password\":\"%s\"}".formatted(name, name, PASSWORD)))
-				.andExpect(status().isCreated());
+		mvc.perform(post("/api/users/me/terms").with(login(name)))
+				.andExpect(status().isOk());
 		return name;
 	}
 
 	private long createSpot(String username) throws Exception {
-		String location = mvc.perform(post("/api/spots").with(httpBasic(username, PASSWORD))
+		String location = mvc.perform(post("/api/spots").with(login(username))
 						.contentType(MediaType.APPLICATION_JSON)
 						.content("{\"categoryCode\":\"BRATWURST\",\"name\":\"Gemeldet " + username + "\",\"latitude\":50.9,\"longitude\":6.9}"))
 				.andExpect(status().isCreated())

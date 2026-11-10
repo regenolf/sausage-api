@@ -16,18 +16,17 @@ import java.util.Set;
 
 /**
  * Begrenzt Schreibzugriffe (POST/PUT/DELETE unter /api) pro angemeldetem User. Sitzt in der Security-Kette nach
- * der Authentifizierung. Anmeldung, Registrierung und Meldungen haben eigene Limits und zählen hier nicht.
+ * der Authentifizierung. Meldungen haben ein eigenes Limit und zählen hier nicht.
  */
 class WriteThrottleFilter extends OncePerRequestFilter {
 
 	private static final Set<String> WRITE_METHODS = Set.of("POST", "PUT", "PATCH", "DELETE");
 
-	private static final Set<String> EXCLUDED = Set.of("/api/auth/login", "/api/auth/register", "/api/auth/token",
-			"/api/users", "/api/reports");
+	private static final Set<String> EXCLUDED = Set.of("/api/reports");
 
-	private final LoginThrottle throttle;
+	private final RequestThrottle throttle;
 
-	WriteThrottleFilter(LoginThrottle throttle) {
+	WriteThrottleFilter(RequestThrottle throttle) {
 		this.throttle = throttle;
 	}
 
@@ -41,7 +40,7 @@ class WriteThrottleFilter extends OncePerRequestFilter {
 			try {
 				throttle.checkWrite(auth.getName());
 			}
-			catch (LoginThrottle.TooManyRequestsException ex) {
+			catch (RequestThrottle.TooManyRequestsException ex) {
 				response.setStatus(HttpStatus.TOO_MANY_REQUESTS.value());
 				ex.getHeaders().forEach((name, values) -> values.forEach(v -> response.addHeader(name, v)));
 				response.setContentType(MediaType.APPLICATION_PROBLEM_JSON_VALUE);

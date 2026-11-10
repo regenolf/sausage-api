@@ -1,6 +1,7 @@
 package de.robertegenolf.sausageapi.importer;
 
 import com.jayway.jsonpath.JsonPath;
+import de.robertegenolf.sausageapi.TestSecurityConfiguration;
 import de.robertegenolf.sausageapi.TestcontainersConfiguration;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -16,7 +17,7 @@ import java.util.UUID;
 import java.util.concurrent.ThreadLocalRandom;
 
 import static org.assertj.core.api.Assertions.assertThat;
-import static org.springframework.security.test.web.servlet.request.SecurityMockMvcRequestPostProcessors.httpBasic;
+import static de.robertegenolf.sausageapi.TestTokens.login;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.delete;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
@@ -26,14 +27,10 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
 /** OSM-Import über /api/admin/imports/osm und die Prüfliste der Moderation. */
-@SpringBootTest(properties = {"app.rate-limit.registrations-per-hour=10000",
-		"app.rate-limit.failed-logins-per-15-minutes=10000",
-		"app.rate-limit.failed-logins-per-ip-per-15-minutes=10000", "app.rate-limit.writes-per-hour=10000"})
+@SpringBootTest(properties = "app.rate-limit.writes-per-hour=10000")
 @AutoConfigureMockMvc
-@Import(TestcontainersConfiguration.class)
+@Import({TestcontainersConfiguration.class, TestSecurityConfiguration.class})
 class OsmImportTests {
-
-	private static final String PASSWORD = "geheimesPasswort";
 
 	@Autowired
 	private MockMvc mvc;
@@ -48,10 +45,10 @@ class OsmImportTests {
 
 		mvc.perform(post("/api/admin/imports/osm").contentType(MediaType.APPLICATION_JSON).content(body))
 				.andExpect(status().isUnauthorized());
-		mvc.perform(post("/api/admin/imports/osm").with(httpBasic(user, PASSWORD))
+		mvc.perform(post("/api/admin/imports/osm").with(login(user))
 						.contentType(MediaType.APPLICATION_JSON).content(body))
 				.andExpect(status().isForbidden());
-		mvc.perform(get("/api/admin/spots/unverified").with(httpBasic(user, PASSWORD)))
+		mvc.perform(get("/api/admin/spots/unverified").with(login(user)))
 				.andExpect(status().isForbidden());
 	}
 
@@ -72,7 +69,7 @@ class OsmImportTests {
 
 		// Probelauf zählt nur
 		mvc.perform(post("/api/admin/imports/osm").param("category", category).param("dryRun", "true")
-						.with(httpBasic(admin, PASSWORD)).contentType(MediaType.APPLICATION_JSON).content(body))
+						.with(login(admin)).contentType(MediaType.APPLICATION_JSON).content(body))
 				.andExpect(status().isOk())
 				.andExpect(jsonPath("$.dryRun").value(true))
 				.andExpect(jsonPath("$.received").value(6))
@@ -86,7 +83,7 @@ class OsmImportTests {
 		assertThat(countImported(category)).isZero();
 
 		mvc.perform(post("/api/admin/imports/osm").param("category", category)
-						.with(httpBasic(admin, PASSWORD)).contentType(MediaType.APPLICATION_JSON).content(body))
+						.with(login(admin)).contentType(MediaType.APPLICATION_JSON).content(body))
 				.andExpect(status().isOk())
 				.andExpect(jsonPath("$.dryRun").value(false))
 				.andExpect(jsonPath("$.created").value(2));
@@ -111,7 +108,7 @@ class OsmImportTests {
 
 		// zweiter Lauf mit gleichen Daten ändert nichts
 		mvc.perform(post("/api/admin/imports/osm").param("category", category)
-						.with(httpBasic(admin, PASSWORD)).contentType(MediaType.APPLICATION_JSON).content(body))
+						.with(login(admin)).contentType(MediaType.APPLICATION_JSON).content(body))
 				.andExpect(jsonPath("$.created").value(0))
 				.andExpect(jsonPath("$.unchanged").value(2));
 		assertThat(countImported(category)).isEqualTo(2);
@@ -130,7 +127,7 @@ class OsmImportTests {
 						.formatted(randomId()));
 
 		mvc.perform(post("/api/admin/imports/osm").param("category", category)
-						.with(httpBasic(admin, PASSWORD)).contentType(MediaType.APPLICATION_JSON).content(body))
+						.with(login(admin)).contentType(MediaType.APPLICATION_JSON).content(body))
 				.andExpect(status().isOk())
 				.andExpect(jsonPath("$.matched").value(1))
 				.andExpect(jsonPath("$.created").value(1))
@@ -158,30 +155,30 @@ class OsmImportTests {
 		long spotId = spotId("node/" + node);
 
 		// ungeprüft: Umbenennung in OSM wird übernommen
-		mvc.perform(post("/api/admin/imports/osm").param("category", category).with(httpBasic(admin, PASSWORD))
+		mvc.perform(post("/api/admin/imports/osm").param("category", category).with(login(admin))
 						.contentType(MediaType.APPLICATION_JSON).content(collection(node(node, "Wurstbude Krause", null))))
 				.andExpect(jsonPath("$.updated").value(1));
 		mvc.perform(get("/api/spots/" + spotId)).andExpect(jsonPath("$.name").value("Wurstbude Krause"));
 
 		// Prüfliste enthält den Spot mit Link zu OSM
 		mvc.perform(get("/api/admin/spots/unverified").param("source", "OSM").param("limit", "1000")
-						.with(httpBasic(admin, PASSWORD)))
+						.with(login(admin)))
 				.andExpect(status().isOk())
 				.andExpect(header().exists("X-Total-Count"))
 				.andExpect(jsonPath("$[?(@.id == " + spotId + ")].sourceUrl")
 						.value("https://www.openstreetmap.org/node/" + node));
 
-		mvc.perform(post("/api/admin/spots/" + spotId + "/verify").with(httpBasic(admin, PASSWORD)))
+		mvc.perform(post("/api/admin/spots/" + spotId + "/verify").with(login(admin)))
 				.andExpect(status().isNoContent());
-		mvc.perform(post("/api/admin/spots/999999999/verify").with(httpBasic(admin, PASSWORD)))
+		mvc.perform(post("/api/admin/spots/999999999/verify").with(login(admin)))
 				.andExpect(status().isNotFound());
 		mvc.perform(get("/api/spots/" + spotId)).andExpect(jsonPath("$.verified").value(true));
 		mvc.perform(get("/api/admin/spots/unverified").param("source", "OSM").param("limit", "1000")
-						.with(httpBasic(admin, PASSWORD)))
+						.with(login(admin)))
 				.andExpect(jsonPath("$[?(@.id == " + spotId + ")]").isEmpty());
 
 		// geprüft: OSM-Änderungen werden nicht mehr übernommen
-		mvc.perform(post("/api/admin/imports/osm").param("category", category).with(httpBasic(admin, PASSWORD))
+		mvc.perform(post("/api/admin/imports/osm").param("category", category).with(login(admin))
 						.contentType(MediaType.APPLICATION_JSON).content(collection(node(node, "Wurstbude ganz anders", null))))
 				.andExpect(jsonPath("$.updated").value(0))
 				.andExpect(jsonPath("$.keptVerified").value(1));
@@ -196,7 +193,7 @@ class OsmImportTests {
 		import_(admin, category, collection(node(node, "Wurststand", null)));
 		long spotId = spotId("node/" + node);
 
-		mvc.perform(put("/api/spots/" + spotId).with(httpBasic(admin, PASSWORD)).contentType(MediaType.APPLICATION_JSON)
+		mvc.perform(put("/api/spots/" + spotId).with(login(admin)).contentType(MediaType.APPLICATION_JSON)
 						.content("{\"categoryCode\":\"%s\",\"name\":\"Wurststand (korrigiert)\",\"latitude\":50.97,\"longitude\":11.03}"
 								.formatted(category)))
 				.andExpect(status().isOk())
@@ -215,12 +212,12 @@ class OsmImportTests {
 		import_(admin, category, body);
 
 		// importierte Spots haben keinen Ersteller: nur Admins dürfen sie ändern oder löschen
-		mvc.perform(delete("/api/spots/" + spotId("node/" + gone)).with(httpBasic(user, PASSWORD)))
+		mvc.perform(delete("/api/spots/" + spotId("node/" + gone)).with(login(user)))
 				.andExpect(status().isForbidden());
-		mvc.perform(delete("/api/spots/" + spotId("node/" + gone)).with(httpBasic(admin, PASSWORD)))
+		mvc.perform(delete("/api/spots/" + spotId("node/" + gone)).with(login(admin)))
 				.andExpect(status().isNoContent());
 
-		mvc.perform(post("/api/admin/imports/osm").param("category", category).with(httpBasic(admin, PASSWORD))
+		mvc.perform(post("/api/admin/imports/osm").param("category", category).with(login(admin))
 						.contentType(MediaType.APPLICATION_JSON).content(body))
 				.andExpect(jsonPath("$.created").value(0))
 				.andExpect(jsonPath("$.unchanged").value(1))
@@ -228,7 +225,7 @@ class OsmImportTests {
 		assertThat(countImported(category)).isEqualTo(1);
 
 		// in OSM verschwunden: wird gezählt, aber nicht gelöscht
-		mvc.perform(post("/api/admin/imports/osm").param("category", category).with(httpBasic(admin, PASSWORD))
+		mvc.perform(post("/api/admin/imports/osm").param("category", category).with(login(admin))
 						.contentType(MediaType.APPLICATION_JSON).content(collection()))
 				.andExpect(jsonPath("$.stale").value(1));
 		assertThat(countImported(category)).isEqualTo(1);
@@ -237,18 +234,18 @@ class OsmImportTests {
 	@Test
 	void pruefFehlerhafteAnfragen() throws Exception {
 		String admin = admin();
-		mvc.perform(post("/api/admin/imports/osm").param("category", "GIBTS_NICHT").with(httpBasic(admin, PASSWORD))
+		mvc.perform(post("/api/admin/imports/osm").param("category", "GIBTS_NICHT").with(login(admin))
 						.contentType(MediaType.APPLICATION_JSON).content(collection()))
 				.andExpect(status().isBadRequest());
-		mvc.perform(post("/api/admin/imports/osm").with(httpBasic(admin, PASSWORD))
+		mvc.perform(post("/api/admin/imports/osm").with(login(admin))
 						.contentType(MediaType.APPLICATION_JSON).content("{\"type\":\"FeatureCollection\"}"))
 				.andExpect(status().isBadRequest());
-		mvc.perform(get("/api/admin/spots/unverified").param("limit", "0").with(httpBasic(admin, PASSWORD)))
+		mvc.perform(get("/api/admin/spots/unverified").param("limit", "0").with(login(admin)))
 				.andExpect(status().isBadRequest());
 	}
 
 	private void import_(String admin, String category, String body) throws Exception {
-		mvc.perform(post("/api/admin/imports/osm").param("category", category).with(httpBasic(admin, PASSWORD))
+		mvc.perform(post("/api/admin/imports/osm").param("category", category).with(login(admin))
 						.contentType(MediaType.APPLICATION_JSON).content(body))
 				.andExpect(status().isOk());
 	}
@@ -288,7 +285,7 @@ class OsmImportTests {
 	/** Eigene Kategorie je Test, damit sich die Zählungen (z. B. stale) nicht gegenseitig beeinflussen. */
 	private String category(String admin) throws Exception {
 		String code = "T" + UUID.randomUUID().toString().replace("-", "").substring(0, 10).toUpperCase();
-		String response = mvc.perform(post("/api/categories").with(httpBasic(admin, PASSWORD))
+		String response = mvc.perform(post("/api/categories").with(login(admin))
 						.contentType(MediaType.APPLICATION_JSON)
 						.content("{\"code\":\"%s\",\"name\":\"Test %s\"}".formatted(code, code)))
 				.andExpect(status().isCreated())
@@ -302,11 +299,12 @@ class OsmImportTests {
 		return admin;
 	}
 
+	/** Erster Login mit neuem Keycloak-Konto (legt den Account an) und Zustimmung zu den Nutzungsbedingungen. */
 	private String register() throws Exception {
 		String name = "i" + UUID.randomUUID().toString().substring(0, 8);
-		mvc.perform(post("/api/users").contentType(MediaType.APPLICATION_JSON)
-						.content("{\"username\":\"%s\",\"email\":\"%s@test.de\",\"acceptTerms\":true,\"password\":\"%s\"}".formatted(name, name, PASSWORD)))
-				.andExpect(status().isCreated());
+		mvc.perform(post("/api/users/me/terms").with(login(name)))
+				.andExpect(status().isOk());
 		return name;
 	}
+
 }

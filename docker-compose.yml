@@ -18,6 +18,25 @@ services:
       timeout: 3s
       retries: 10
 
+  # Anmeldung wie in Produktion: Keycloak mit Realm "sausage" (Kopie aus kvm-infra, wird beim ersten Start importiert).
+  # Konten bleiben erhalten, bis der Container neu erstellt wird (docker compose down).
+  # Admin-Konsole http://localhost:8180/admin (admin/admin), Registrieren über die App bzw.
+  # http://localhost:8180/realms/sausage/account
+  keycloak:
+    image: quay.io/keycloak/keycloak:26.8.2
+    container_name: sausage-keycloak
+    restart: unless-stopped
+    command: ["start-dev", "--import-realm", "--http-port=8180"]
+    environment:
+      KC_BOOTSTRAP_ADMIN_USERNAME: admin
+      KC_BOOTSTRAP_ADMIN_PASSWORD: admin
+      # Nur lokal: Secret des Dienstkontos sausage-api-admin (Konto löschen, überall abmelden)
+      SAUSAGE_API_ADMIN_CLIENT_SECRET: lokales-dev-secret-0123456789abcdef
+    ports:
+      - "127.0.0.1:8180:8180"
+    volumes:
+      - ./dev/keycloak:/opt/keycloak/data/import:ro
+
   # Optional: startet auch die API im Container (docker compose --profile app up --build)
   api:
     profiles: ["app"]
@@ -30,6 +49,11 @@ services:
       DB_URL: jdbc:postgresql://postgres:5432/sausage
       DB_USERNAME: sausage
       DB_PASSWORD: sausage
+      # Tokens tragen die Adresse aus Sicht des Browsers (localhost:8180), Schlüssel holt die API intern
+      OIDC_ISSUER_URI: http://localhost:8180/realms/sausage
+      OIDC_JWK_SET_URI: http://keycloak:8180/realms/sausage/protocol/openid-connect/certs
+      KEYCLOAK_ADMIN_URL: http://keycloak:8180
+      KEYCLOAK_ADMIN_CLIENT_SECRET: lokales-dev-secret-0123456789abcdef
     ports:
       - "127.0.0.1:8080:8080"
 

@@ -17,8 +17,9 @@
 #
 # Umgebungsvariablen:
 #   API_URL         Basis-URL der API (Standard http://localhost:8080; Produktion https://www.wurst-weiser.de)
-#   ADMIN_USER      Benutzername eines Admins (wird sonst abgefragt)
-#   ADMIN_PASSWORD  Passwort (wird sonst verdeckt abgefragt)
+#   KEYCLOAK_URL    Keycloak für die Anmeldung (Standard https://auth.robertegenolf.de, bei lokaler API
+#                   http://localhost:8180). Angemeldet wird im Browser per Geräte-Code als Admin der App.
+#   ACCESS_TOKEN    fertiges Access Token statt der Anmeldung im Browser (optional)
 #   REGION          Geofabrik-Pfad (Standard europe/germany = ganz Deutschland, ca. 4,5 GB; nur Thüringen:
 #                   europe/germany/thueringen)
 #   CATEGORY        Kategorie-Code der Spots (Standard BRATWURST)
@@ -44,6 +45,14 @@ for arg in "$@"; do
 		*) echo "Unbekannte Option: $arg (erlaubt: --apply, --dry-run)" >&2; exit 2 ;;
 	esac
 done
+
+if [[ -z "${KEYCLOAK_URL:-}" ]]; then
+	case "$API_URL" in
+		http://localhost*|http://127.0.0.1*) KEYCLOAK_URL=http://localhost:8180 ;;
+		*) KEYCLOAK_URL=https://auth.robertegenolf.de ;;
+	esac
+fi
+KEYCLOAK_REALM="${KEYCLOAK_REALM:-sausage}"
 
 for tool in osmium jq curl; do
 	command -v "$tool" >/dev/null || { echo "$tool fehlt (macOS: brew install osmium-tool jq, Ubuntu: apt install osmium-tool jq)" >&2; exit 1; }
@@ -149,12 +158,34 @@ if (( $(wc -c < "$payload") > 11 * 1024 * 1024 )); then
 	echo "REGION nehmen (z. B. europe/germany/bayern) oder direkt gegen die API importieren (API_URL auf den Backend-Port)."
 fi
 
-if [[ -z "${ADMIN_USER:-}" ]]; then
-	read -rp "Admin-Benutzer für $API_URL: " ADMIN_USER
-fi
-if [[ -z "${ADMIN_PASSWORD:-}" ]]; then
-	read -rsp "Passwort: " ADMIN_PASSWORD
-	echo
+# Anmeldung per Geräte-Code (OAuth Device Flow, Client sausage-cli): Link im Browser öffnen, als Admin anmelden,
+# zustimmen. Erst jetzt, damit das Token (5 Minuten gültig) nicht während der Aufbereitung abläuft.
+login() {
+	local oidc="$KEYCLOAK_URL/realms/$KEYCLOAK_REALM/protocol/openid-connect" device interval device_code response error
+	device="$(curl -fsS -d client_id=sausage-cli -d scope=openid "$oidc/auth/device")"
+	interval="$(jq -r '.interval // 5' <<<"$device")"
+	device_code="$(jq -r '.device_code' <<<"$device")"
+	echo "==> Anmeldung: im Browser öffnen und als Admin anmelden (Code $(jq -r '.user_code' <<<"$device")):" >&2
+	echo "    $(jq -r '.verification_uri_complete' <<<"$device")" >&2
+	command -v open >/dev/null && open "$(jq -r '.verification_uri_complete' <<<"$device")" 2>/dev/null || true
+	while true; do
+		sleep "$interval"
+		response="$(curl -sS -d grant_type=urn:ietf:params:oauth:grant-type:device_code \
+			-d client_id=sausage-cli -d device_code="$device_code" "$oidc/token")"
+		if jq -e '.access_token' <<<"$response" >/dev/null; then
+			jq -r '.access_token' <<<"$response"
+			return
+		fi
+		error="$(jq -r '.error // "unbekannt"' <<<"$response")"
+		case "$error" in
+			authorization_pending) ;;
+			slow_down) interval=$((interval + 5)) ;;
+			*) echo "Anmeldung fehlgeschlagen: $error" >&2; exit 1 ;;
+		esac
+	done
+}
+if [[ -z "${ACCESS_TOKEN:-}" ]]; then
+	ACCESS_TOKEN="$(login)"
 fi
 
 if $DRY_RUN; then
@@ -163,8 +194,8 @@ else
 	echo "==> Importiere nach $API_URL"
 fi
 
-# Zugangsdaten über stdin statt Kommandozeile, damit sie nicht in der Prozessliste stehen
-response="$(printf 'user = "%s:%s"\n' "$ADMIN_USER" "$ADMIN_PASSWORD" | curl -fsS -K - \
+# Token über stdin statt Kommandozeile, damit es nicht in der Prozessliste steht
+response="$(printf 'header = "Authorization: Bearer %s"\n' "$ACCESS_TOKEN" | curl -fsS -K - \
 	-H 'Content-Type: application/json' --data-binary "@$payload" \
 	"$API_URL/api/admin/imports/osm?category=$CATEGORY&dryRun=$DRY_RUN")"
 

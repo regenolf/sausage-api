@@ -72,8 +72,8 @@ class FixedWindowRateLimiterTests {
 
 	@Test
 	void ipv6WirdAufPraefixReduziert() {
-		assertThat(LoginThrottle.clientKey("2001:db8:1:2:aaaa::1")).isEqualTo(LoginThrottle.clientKey("2001:db8:1:2:ffff:1:2:3"));
-		assertThat(LoginThrottle.clientKey("2001:db8:1:2::1")).isNotEqualTo(LoginThrottle.clientKey("2001:db8:1:3::1"));
-		assertThat(LoginThrottle.clientKey("203.0.113.7")).isEqualTo("203.0.113.7");
+		assertThat(RequestThrottle.clientKey("2001:db8:1:2:aaaa::1")).isEqualTo(RequestThrottle.clientKey("2001:db8:1:2:ffff:1:2:3"));
+		assertThat(RequestThrottle.clientKey("2001:db8:1:2::1")).isNotEqualTo(RequestThrottle.clientKey("2001:db8:1:3::1"));
+		assertThat(RequestThrottle.clientKey("203.0.113.7")).isEqualTo("203.0.113.7");
 	}
 }
