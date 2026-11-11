@@ -71,19 +71,35 @@ class SpotController {
 	/**
 	 * Alle Spots als Liste; mit {@code size} (und optional {@code page}) seitenweise.
 	 * Die Gesamtzahl der Treffer steht im Header {@code X-Total-Count}.
+	 * {@code sort}: {@code name} (Standard), {@code newest} oder {@code rating}; {@code source}: nur Spots dieser
+	 * Herkunft, z. B. {@code USER} für „neu von der Community“.
 	 */
 	@GetMapping("/spots")
 	ResponseEntity<List<SpotSummary>> spots(@RequestParam(required = false) String category,
 			@RequestParam(required = false) @Size(max = 150) String q,
+			@RequestParam(defaultValue = "name") String sort,
+			@RequestParam(required = false) String source,
 			@RequestParam(defaultValue = "0") @Min(0) int page,
 			@RequestParam(required = false) @Min(1) @Max(100) Integer size, Authentication auth) {
 		String search = q == null || q.isBlank() ? null : q.trim();
+		SpotRepository.SpotSort order = parseSort(sort);
+		String origin = source == null || source.isBlank() ? null : source.trim().toUpperCase(java.util.Locale.ROOT);
 		List<SpotSummary> spots = size == null
-				? repository.findSpots(category, search, null, 0, viewerId(auth))
-				: repository.findSpots(category, search, size, (long) page * size, viewerId(auth));
+				? repository.findSpots(category, search, origin, order, null, 0, viewerId(auth))
+				: repository.findSpots(category, search, origin, order, size, (long) page * size, viewerId(auth));
 		return ResponseEntity.ok()
-				.header("X-Total-Count", String.valueOf(repository.countSpots(category, search)))
+				.header("X-Total-Count", String.valueOf(repository.countSpots(category, search, origin)))
 				.body(spots);
+	}
+
+	/**
+	 * Zuletzt abgegebene Bewertungen über alle Buden (Startseite „Frisch bewertet“). Standardmäßig nur solche mit
+	 * Text, {@code withComment=false} liefert auch reine Sternebewertungen.
+	 */
+	@GetMapping("/ratings/recent")
+	List<SpotDtos.RecentRating> recentRatings(@RequestParam(defaultValue = "10") @Min(1) @Max(50) int limit,
+			@RequestParam(defaultValue = "true") boolean withComment, Authentication auth) {
+		return repository.findRecentRatings(limit, withComment, viewerId(auth));
 	}
 
 	@GetMapping("/users/me/spots")
@@ -145,6 +161,31 @@ class SpotController {
 		}
 		repository.deleteSpot(id);
 		return ResponseEntity.noContent().build();
+	}
+
+	/**
+	 * Titelbild festlegen: eines der Fotos der Bude, {@code photoId: null} setzt auf das erste Foto zurück. Dürfen
+	 * der Ersteller und Admins (bei importierten Buden ohne Ersteller also nur Admins). Liefert die Bude neu.
+	 */
+	@Transactional
+	@PutMapping("/spots/{id}/cover")
+	SpotDetail setCover(@PathVariable long id, @RequestBody SpotDtos.CoverRequest request, Authentication auth) {
+		if (isAdmin(auth)) {
+			requireSpot(id);
+		}
+		else {
+			long ownerId = repository.findSpotOwner(id).orElseThrow(() -> notFound(id));
+			if (ownerId != currentUserId(auth)) {
+				throw new ResponseStatusException(HttpStatus.FORBIDDEN,
+						"Das Titelbild dürfen nur der Ersteller der Bude und die Moderation ändern");
+			}
+		}
+		Long photoId = request == null ? null : request.photoId();
+		if (photoId != null && photos.findUploader(id, photoId).isEmpty()) {
+			throw new ResponseStatusException(HttpStatus.NOT_FOUND, "Foto " + photoId + " gehört nicht zu dieser Bude");
+		}
+		repository.setCoverPhoto(id, photoId);
+		return detail(id, auth);
 	}
 
 	/** Bewertet (oder überschreibt die eigene Bewertung) und liefert den aktualisierten Spot. */
@@ -249,6 +290,16 @@ class SpotController {
 
 	private static String blankToNull(String text) {
 		return text == null || text.isBlank() ? null : text.trim();
+	}
+
+	private static SpotRepository.SpotSort parseSort(String sort) {
+		try {
+			return SpotRepository.SpotSort.valueOf(sort.trim().toUpperCase(java.util.Locale.ROOT));
+		}
+		catch (IllegalArgumentException ex) {
+			throw new ResponseStatusException(HttpStatus.BAD_REQUEST,
+					"Unbekannte Sortierung: " + sort + " (erlaubt: name, newest, rating)");
+		}
 	}
 
 	private static boolean isAdmin(Authentication auth) {

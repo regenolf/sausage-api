@@ -39,14 +39,18 @@ class PhotoRepository {
 				.single();
 	}
 
-	/** Fotos eines Spots ohne die von Nutzern, die {@code viewerId} blockiert hat (-1 = anonym). */
+	/**
+	 * Fotos eines Spots ohne die von Nutzern, die {@code viewerId} blockiert hat (-1 = anonym). Das gewählte Titelbild
+	 * steht vorne, danach nach Upload-Zeit.
+	 */
 	List<SpotPhoto> findBySpot(long spotId, long viewerId) {
 		return jdbc.sql("""
 				SELECT p.id, p.spot_id, u.username, p.content_type, p.size_bytes, p.created_at
 				FROM spot_photo p
 				JOIN app_user u ON u.id = p.user_id
+				JOIN spot s ON s.id = p.spot_id
 				WHERE p.spot_id = :spotId AND %s
-				ORDER BY p.created_at, p.id
+				ORDER BY CASE WHEN p.id = s.cover_photo_id THEN 0 ELSE 1 END, p.created_at, p.id
 				""".formatted(SpotRepository.NOT_BLOCKED.formatted("p.user_id")))
 				.param("spotId", spotId)
 				.param("viewerId", viewerId)

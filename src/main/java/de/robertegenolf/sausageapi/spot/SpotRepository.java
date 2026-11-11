@@ -28,7 +28,7 @@ class SpotRepository {
 			SELECT s.id, c.code AS category_code, s.name, s.description, s.street, s.house_number,
 			       s.zip_code, s.city, s.latitude, s.longitude, s.opening_hours,
 			       u.username AS created_by, s.created_at, s.updated_at,
-			       s.source, s.verified, s.external_id,
+			       s.source, s.verified, s.external_id, s.cover_photo_id AS chosen_cover_id,
 			       AVG(r.score)::float8 AS average_rating,
 			       COUNT(r.id) AS rating_count
 			FROM spot s
@@ -40,15 +40,16 @@ class SpotRepository {
 	private static final String SPOT_GROUP_BY = "GROUP BY s.id, c.code, u.username\n";
 
 	/**
-	 * Für Listen: SPOT_SELECT plus erstes Foto als Vorschaubild (ohne Fotos von Nutzern, die :viewerId blockiert
-	 * hat). Der LATERAL-Join liefert höchstens eine Zeile je Spot und vervielfacht die Bewertungen nicht.
+	 * Für Listen: SPOT_SELECT plus Vorschaubild – das gewählte Titelbild, sonst das erste Foto (jeweils ohne Fotos
+	 * von Nutzern, die :viewerId blockiert hat). Der LATERAL-Join liefert höchstens eine Zeile je Spot und
+	 * vervielfacht die Bewertungen nicht.
 	 */
 	private static final String LIST_SELECT = SPOT_SELECT.replace("COUNT(r.id) AS rating_count",
 			"COUNT(r.id) AS rating_count, cover.id AS cover_photo_id") + """
 			LEFT JOIN LATERAL (
 			    SELECT p.id FROM spot_photo p
 			    WHERE p.spot_id = s.id AND %s
-			    ORDER BY p.created_at, p.id
+			    ORDER BY CASE WHEN p.id = s.cover_photo_id THEN 0 ELSE 1 END, p.created_at, p.id
 			    LIMIT 1
 			) cover ON true
 			""".formatted(SpotRepository.NOT_BLOCKED.formatted("p.user_id"));
@@ -86,6 +87,7 @@ class SpotRepository {
 			rs.getTimestamp("updated_at").toInstant(),
 			rs.getString("source"), rs.getBoolean("verified"),
 			SpotDtos.sourceUrl(rs.getString("source"), rs.getString("external_id")),
+			nullableLong(rs, "chosen_cover_id"),
 			List.of());
 
 	private final JdbcClient jdbc;
@@ -110,6 +112,7 @@ class SpotRepository {
 
 	private static final String SPOT_FILTER = """
 			WHERE (CAST(:categoryCode AS varchar) IS NULL OR c.code = :categoryCode)
+			  AND (CAST(:source AS varchar) IS NULL OR s.source = :source)
 			  AND (CAST(:search AS varchar) IS NULL OR s.name ILIKE '%' || CAST(:search AS varchar) || '%'
 			       OR s.city ILIKE '%' || CAST(:search AS varchar) || '%')
 			""";
@@ -128,14 +131,38 @@ class SpotRepository {
 				.single();
 	}
 
-	/** {@code limit == null} liefert alle Treffer; {@code viewerId} für das Vorschaubild (-1 = anonym). */
-	List<SpotSummary> findSpots(String categoryCode, String search, Integer limit, long offset, long viewerId) {
-		String sql = LIST_SELECT + SPOT_FILTER + LIST_GROUP_BY + """
-				ORDER BY s.name, s.id
+	/** Sortierung der Spot-Liste. */
+	enum SpotSort {
+		/** alphabetisch (Standard) */
+		NAME("s.name, s.id"),
+		/** zuletzt eingetragen zuerst */
+		NEWEST("s.created_at DESC, s.id DESC"),
+		/**
+		 * Beste zuerst, gedämpft durch zwei gedachte Bewertungen mit 3,5 Sternen: eine einzelne 5 schlägt nicht
+		 * zehn 4,8er. Unbewertete ans Ende.
+		 */
+		RATING("COUNT(r.id) = 0, (COALESCE(SUM(r.score), 0) + 7.0) / (COUNT(r.id) + 2) DESC, COUNT(r.id) DESC, s.name, s.id");
+
+		final String orderBy;
+
+		SpotSort(String orderBy) {
+			this.orderBy = orderBy;
+		}
+	}
+
+	/**
+	 * {@code limit == null} liefert alle Treffer; {@code source} filtert nach Herkunft (z. B. USER), null = alle;
+	 * {@code viewerId} für das Vorschaubild (-1 = anonym).
+	 */
+	List<SpotSummary> findSpots(String categoryCode, String search, String source, SpotSort sort, Integer limit,
+			long offset, long viewerId) {
+		String sql = LIST_SELECT + SPOT_FILTER + LIST_GROUP_BY + "ORDER BY " + sort.orderBy + """
+
 				LIMIT CAST(:limit AS integer) OFFSET :offset
 				""";
 		return jdbc.sql(sql)
 				.param("categoryCode", categoryCode)
+				.param("source", source)
 				.param("search", escapeLike(search))
 				.param("limit", limit)
 				.param("offset", offset)
@@ -153,13 +180,14 @@ class SpotRepository {
 				.list();
 	}
 
-	long countSpots(String categoryCode, String search) {
+	long countSpots(String categoryCode, String search, String source) {
 		return jdbc.sql("""
 				SELECT COUNT(*) FROM spot s
 				JOIN category c ON c.id = s.category_id
 				""" + SPOT_FILTER)
 				.param("categoryCode", categoryCode)
 				.param("search", escapeLike(search))
+				.param("source", source)
 				.query(Long.class)
 				.single();
 	}
@@ -289,6 +317,40 @@ class SpotRepository {
 				.param("ownerId", ownerId)
 				.query(Boolean.class)
 				.single();
+	}
+
+	/** Setzt das Titelbild ({@code null} = wieder das erste Foto). Das Foto muss zum Spot gehören. */
+	void setCoverPhoto(long spotId, Long photoId) {
+		jdbc.sql("UPDATE spot SET cover_photo_id = :photoId WHERE id = :id")
+				.param("photoId", photoId)
+				.param("id", spotId)
+				.update();
+	}
+
+	/**
+	 * Zuletzt abgegebene Bewertungen über alle Spots (Startseite), ohne die von Nutzern, die {@code viewerId}
+	 * blockiert hat. {@code withComment}: nur Bewertungen mit Text.
+	 */
+	List<SpotDtos.RecentRating> findRecentRatings(int limit, boolean withComment, long viewerId) {
+		return jdbc.sql("""
+				SELECT r.id, r.score, r.comment, r.created_at, u.username,
+				       s.id AS spot_id, s.name AS spot_name, s.city, c.code AS category_code
+				FROM rating r
+				JOIN app_user u ON u.id = r.user_id
+				JOIN spot s ON s.id = r.spot_id
+				JOIN category c ON c.id = s.category_id
+				WHERE (NOT :withComment OR r.comment IS NOT NULL) AND %s
+				ORDER BY r.created_at DESC, r.id DESC
+				LIMIT :limit
+				""".formatted(NOT_BLOCKED.formatted("r.user_id")))
+				.param("withComment", withComment)
+				.param("viewerId", viewerId)
+				.param("limit", limit)
+				.query((rs, n) -> new SpotDtos.RecentRating(rs.getLong("id"), rs.getInt("score"),
+						rs.getString("comment"), rs.getString("username"), rs.getTimestamp("created_at").toInstant(),
+						rs.getLong("spot_id"), rs.getString("spot_name"), rs.getString("city"),
+						rs.getString("category_code")))
+				.list();
 	}
 
 	void deleteSpot(long id) {
@@ -456,6 +518,11 @@ class SpotRepository {
 	private static String escapeLike(String search) {
 		return search == null ? null
 				: search.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_");
+	}
+
+	private static Long nullableLong(ResultSet rs, String column) throws SQLException {
+		long value = rs.getLong(column);
+		return rs.wasNull() ? null : value;
 	}
 
 	private static Double averageRating(ResultSet rs) throws SQLException {

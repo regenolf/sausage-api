@@ -911,6 +911,135 @@ class SpotApiTests {
 	}
 
 	@Test
+	void erstellerUndAdminWaehlenDasTitelbild() throws Exception {
+		String owner = newName();
+		String other = newName();
+		String admin = newName();
+		register(owner);
+		register(other);
+		register(admin);
+		jdbc.sql("UPDATE app_user SET role = 'ADMIN' WHERE username = :u").param("u", admin).update();
+		String name = "Titelbild " + owner;
+		long spotId = createSpot(owner, name, 49.0, 10.0);
+		long first = uploadPhoto(spotId, owner);
+		long second = uploadPhoto(spotId, other);
+		long foreignSpot = createSpot(other, "Fremd " + other, 49.1, 10.1);
+		long foreignPhoto = uploadPhoto(foreignSpot, other);
+
+		// Ohne Wahl: erstes Foto
+		mvc.perform(get("/api/spots/" + spotId))
+				.andExpect(jsonPath("$.coverPhotoId").value(org.hamcrest.Matchers.nullValue()))
+				.andExpect(jsonPath("$.photos[0].id").value(first));
+
+		// Nur Ersteller und Admins; das Foto muss zur Bude gehören
+		mvc.perform(put("/api/spots/" + spotId + "/cover").with(login(other)).contentType(MediaType.APPLICATION_JSON)
+						.content("{\"photoId\":" + second + "}"))
+				.andExpect(status().isForbidden());
+		mvc.perform(put("/api/spots/" + spotId + "/cover").contentType(MediaType.APPLICATION_JSON)
+						.content("{\"photoId\":" + second + "}"))
+				.andExpect(status().isUnauthorized());
+		mvc.perform(put("/api/spots/" + spotId + "/cover").with(login(owner)).contentType(MediaType.APPLICATION_JSON)
+						.content("{\"photoId\":" + foreignPhoto + "}"))
+				.andExpect(status().isNotFound());
+
+		mvc.perform(put("/api/spots/" + spotId + "/cover").with(login(owner)).contentType(MediaType.APPLICATION_JSON)
+						.content("{\"photoId\":" + second + "}"))
+				.andExpect(status().isOk())
+				.andExpect(jsonPath("$.coverPhotoId").value(second))
+				.andExpect(jsonPath("$.photos[0].id").value(second))
+				.andExpect(jsonPath("$.photos[1].id").value(first));
+		mvc.perform(get("/api/spots").param("q", name))
+				.andExpect(jsonPath("$[0].coverPhotoUrl").value(org.hamcrest.Matchers.endsWith("/photos/" + second)));
+
+		// Admin setzt zurück
+		mvc.perform(put("/api/spots/" + spotId + "/cover").with(login(admin)).contentType(MediaType.APPLICATION_JSON)
+						.content("{\"photoId\":null}"))
+				.andExpect(status().isOk())
+				.andExpect(jsonPath("$.coverPhotoId").value(org.hamcrest.Matchers.nullValue()))
+				.andExpect(jsonPath("$.photos[0].id").value(first));
+
+		// Wird das gewählte Foto gelöscht, gilt wieder das erste
+		mvc.perform(put("/api/spots/" + spotId + "/cover").with(login(owner)).contentType(MediaType.APPLICATION_JSON)
+						.content("{\"photoId\":" + second + "}"))
+				.andExpect(status().isOk());
+		mvc.perform(delete("/api/spots/" + spotId + "/photos/" + second).with(login(other)))
+				.andExpect(status().isNoContent());
+		mvc.perform(get("/api/spots/" + spotId))
+				.andExpect(jsonPath("$.coverPhotoId").value(org.hamcrest.Matchers.nullValue()))
+				.andExpect(jsonPath("$.photos[0].id").value(first));
+	}
+
+	@Test
+	void listeNachNeuestenUndBewertungSortierbarUndNachHerkunftFilterbar() throws Exception {
+		String user = newName();
+		String rater = newName();
+		register(user);
+		register(rater);
+		String prefix = "Sortiert " + user;
+		long older = createSpot(user, prefix + " A", 50.0, 8.0);
+		long newer = createSpot(user, prefix + " B", 50.0, 8.0);
+		long unrated = createSpot(user, prefix + " C", 50.0, 8.0);
+		jdbc.sql("UPDATE spot SET created_at = CURRENT_TIMESTAMP - INTERVAL '1 day' WHERE id = :id").param("id", older).update();
+		rate(older, user, 5);
+		rate(older, rater, 5);
+		rate(newer, user, 3);
+
+		mvc.perform(get("/api/spots").param("q", prefix).param("sort", "newest"))
+				.andExpect(jsonPath("$[2].id").value(older));
+		mvc.perform(get("/api/spots").param("q", prefix).param("sort", "rating"))
+				.andExpect(jsonPath("$[0].id").value(older))
+				.andExpect(jsonPath("$[1].id").value(newer))
+				.andExpect(jsonPath("$[2].id").value(unrated));
+		mvc.perform(get("/api/spots").param("q", prefix).param("sort", "quatsch"))
+				.andExpect(status().isBadRequest());
+		mvc.perform(get("/api/spots").param("q", prefix).param("source", "user"))
+				.andExpect(header().string("X-Total-Count", "3"));
+		mvc.perform(get("/api/spots").param("q", prefix).param("source", "OSM"))
+				.andExpect(header().string("X-Total-Count", "0"));
+	}
+
+	@Test
+	void frischBewertetZeigtNeuesteBewertungenMitText() throws Exception {
+		String author = newName();
+		String viewer = newName();
+		register(author);
+		register(viewer);
+		long spotId = createSpot(author, "Frisch " + author, 51.0, 7.0);
+		mvc.perform(post("/api/spots/" + spotId + "/ratings").with(login(author)).contentType(MediaType.APPLICATION_JSON)
+						.content("{\"score\":4,\"comment\":\"Knusprig, guter Senf\"}"))
+				.andExpect(status().isOk());
+
+		mvc.perform(get("/api/ratings/recent").param("limit", "50"))
+				.andExpect(status().isOk())
+				.andExpect(jsonPath("$[?(@.author == '" + author + "')].spotId").value(org.hamcrest.Matchers.contains((int) spotId)))
+				.andExpect(jsonPath("$[?(@.author == '" + author + "')].comment").value(org.hamcrest.Matchers.contains("Knusprig, guter Senf")))
+				.andExpect(jsonPath("$[?(@.author == '" + author + "')].categoryCode").value(org.hamcrest.Matchers.contains("BRATWURST")));
+
+		// Blockierte Nutzer tauchen nicht auf
+		mvc.perform(post("/api/users/me/blocks").with(login(viewer)).contentType(MediaType.APPLICATION_JSON)
+						.content("{\"username\":\"" + author + "\"}"))
+				.andExpect(status().isNoContent());
+		mvc.perform(get("/api/ratings/recent").param("limit", "50").with(login(viewer)))
+				.andExpect(jsonPath("$[?(@.author == '" + author + "')]").isEmpty());
+	}
+
+	private long uploadPhoto(long spotId, String username) throws Exception {
+		BufferedImage image = new BufferedImage(4, 4, BufferedImage.TYPE_INT_RGB);
+		ByteArrayOutputStream buffer = new ByteArrayOutputStream();
+		ImageIO.write(image, "png", buffer);
+		String body = mvc.perform(multipart("/api/spots/" + spotId + "/photos").with(login(username))
+						.file(new MockMultipartFile("file", "f.png", "image/png", buffer.toByteArray())))
+				.andExpect(status().isCreated()).andReturn().getResponse().getContentAsString();
+		return ((Number) JsonPath.read(body, "$.id")).longValue();
+	}
+
+	private void rate(long spotId, String username, int score) throws Exception {
+		mvc.perform(post("/api/spots/" + spotId + "/ratings").with(login(username)).contentType(MediaType.APPLICATION_JSON)
+						.content("{\"score\":" + score + "}"))
+				.andExpect(status().isOk());
+	}
+
+	@Test
 	void ueberallAbmeldenIstOhneKeycloakAdminEinNoOp() throws Exception {
 		String name = newName();
 		register(name);
