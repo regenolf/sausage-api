@@ -218,6 +218,64 @@ class SpotRepository {
 				.list();
 	}
 
+	/** Bedingung für Buden im Ausschnitt (nutzt idx_spot_coordinates) und optional einer Kategorie. */
+	private static final String AREA_FILTER = """
+			WHERE (CAST(:categoryCode AS varchar) IS NULL OR c.code = :categoryCode)
+			  AND s.latitude BETWEEN :minLat AND :maxLat
+			  AND s.longitude BETWEEN :minLon AND :maxLon
+			""";
+
+	long countSpotsInArea(BoundingBox box, String categoryCode) {
+		return jdbc.sql("SELECT COUNT(*) FROM spot s JOIN category c ON c.id = s.category_id\n" + AREA_FILTER)
+				.params(areaParams(box, categoryCode))
+				.query(Long.class)
+				.single();
+	}
+
+	/** Buden im Ausschnitt, bestbewertete zuerst – {@code limit} begrenzt nur zur Sicherheit. */
+	List<SpotSummary> findSpotsInArea(BoundingBox box, String categoryCode, int limit, long viewerId) {
+		String sql = LIST_SELECT + AREA_FILTER + LIST_GROUP_BY + "ORDER BY " + SpotSort.RATING.orderBy
+				+ "\nLIMIT :limit\n";
+		return jdbc.sql(sql)
+				.params(areaParams(box, categoryCode))
+				.param("limit", limit)
+				.param("viewerId", viewerId)
+				.query(spotSummary)
+				.list();
+	}
+
+	/**
+	 * Fasst die Buden im Ausschnitt in einem Raster zusammen. Das Raster hängt an festen Koordinaten (nicht am
+	 * Ausschnitt), damit Cluster beim Verschieben der Karte nicht springen; {@code cellLat}/{@code cellLon} in Grad.
+	 */
+	List<SpotDtos.SpotCluster> findClustersInArea(BoundingBox box, String categoryCode, double cellLat,
+			double cellLon) {
+		return jdbc.sql("""
+				SELECT AVG(s.latitude)::float8 AS latitude, AVG(s.longitude)::float8 AS longitude, COUNT(*) AS count
+				FROM spot s
+				JOIN category c ON c.id = s.category_id
+				""" + AREA_FILTER + """
+				GROUP BY FLOOR(s.latitude / :cellLat), FLOOR(s.longitude / :cellLon)
+				ORDER BY count DESC
+				""")
+				.params(areaParams(box, categoryCode))
+				.param("cellLat", BigDecimal.valueOf(cellLat))
+				.param("cellLon", BigDecimal.valueOf(cellLon))
+				.query((rs, n) -> new SpotDtos.SpotCluster(rs.getDouble("latitude"), rs.getDouble("longitude"),
+						rs.getLong("count")))
+				.list();
+	}
+
+	private static Map<String, Object> areaParams(BoundingBox box, String categoryCode) {
+		Map<String, Object> params = new HashMap<>();
+		params.put("categoryCode", categoryCode);
+		params.put("minLat", box.minLat());
+		params.put("maxLat", box.maxLat());
+		params.put("minLon", box.minLon());
+		params.put("maxLon", box.maxLon());
+		return params;
+	}
+
 	/**
 	 * Rechteck, das den Suchkreis sicher enthält. Damit kann Postgres den Koordinaten-Index nutzen,
 	 * bevor die exakte Haversine-Distanz nur noch für die Kandidaten berechnet wird. Die Grenzen sind
@@ -245,6 +303,12 @@ class SpotRepository {
 			}
 			return new BoundingBox(decimal(Math.max(minLat, -90)), decimal(Math.min(maxLat, 90)),
 					decimal(minLon), decimal(maxLon));
+		}
+
+		/** Kartenausschnitt; Grenzen werden auf gültige Koordinaten beschnitten. */
+		static BoundingBox of(double south, double west, double north, double east) {
+			return new BoundingBox(decimal(Math.max(south, -90)), decimal(Math.min(north, 90)),
+					decimal(Math.max(west, -180)), decimal(Math.min(east, 180)));
 		}
 
 		private static BigDecimal decimal(double value) {

@@ -268,6 +268,54 @@ class SpotApiTests {
 	}
 
 	@Test
+	void kartenausschnittLiefertBudenEinzelnOderAlsCluster() throws Exception {
+		String username = newName();
+		register(username);
+		// Abgelegene Gegend, in der kein anderer Test Buden anlegt
+		long a = createSpot(username, "Ausschnitt A " + username, -30.10, 120.10);
+		long b = createSpot(username, "Ausschnitt B " + username, -30.11, 120.12);
+		long c = createSpot(username, "Ausschnitt C " + username, -30.80, 120.90);
+		long aussen = createSpot(username, "Ausschnitt außen " + username, -32.0, 120.5);
+
+		mvc.perform(get("/api/spots/area").param("south", "-31").param("west", "120")
+						.param("north", "-30").param("east", "121"))
+				.andExpect(status().isOk())
+				.andExpect(jsonPath("$.total").value(3))
+				.andExpect(jsonPath("$.clusters").isEmpty())
+				.andExpect(jsonPath("$.spots.length()").value(3))
+				.andExpect(jsonPath("$.spots[?(@.id == " + a + ")]").exists())
+				.andExpect(jsonPath("$.spots[?(@.id == " + b + ")]").exists())
+				.andExpect(jsonPath("$.spots[?(@.id == " + c + ")]").exists())
+				.andExpect(jsonPath("$.spots[?(@.id == " + aussen + ")]").doesNotExist());
+
+		// Mehr Treffer als limit → nur Cluster: A und B liegen in einer Zelle, C in einer anderen
+		mvc.perform(get("/api/spots/area").param("south", "-31").param("west", "120")
+						.param("north", "-30").param("east", "121").param("limit", "2"))
+				.andExpect(status().isOk())
+				.andExpect(jsonPath("$.total").value(3))
+				.andExpect(jsonPath("$.spots").isEmpty())
+				.andExpect(jsonPath("$.clusters.length()").value(2))
+				.andExpect(jsonPath("$.clusters[0].count").value(2))
+				.andExpect(jsonPath("$.clusters[1].count").value(1));
+
+		mvc.perform(get("/api/spots/area").param("south", "-31").param("west", "120")
+						.param("north", "-30").param("east", "121").param("category", "GIBTS_NICHT"))
+				.andExpect(status().isOk())
+				.andExpect(jsonPath("$.total").value(0));
+
+		mvc.perform(get("/api/spots/area").param("south", "-30").param("west", "120")
+						.param("north", "-31").param("east", "121"))
+				.andExpect(status().isBadRequest());
+	}
+
+	@Test
+	void clusterZellenSindZweierpotenzen() {
+		org.junit.jupiter.api.Assertions.assertEquals(1.0, SpotController.clusterCell(6));
+		org.junit.jupiter.api.Assertions.assertEquals(0.125, SpotController.clusterCell(0.8));
+		org.junit.jupiter.api.Assertions.assertEquals(2.0, SpotController.clusterCell(10));
+	}
+
+	@Test
 	void spotListeIstPaginiertUndDurchsuchbar() throws Exception {
 		String username = newName();
 		register(username);
