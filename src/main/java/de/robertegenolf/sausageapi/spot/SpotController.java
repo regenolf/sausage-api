@@ -116,6 +116,46 @@ class SpotController {
 		return repository.findSpotsNear(latitude, longitude, radiusKm, category, viewerId(auth));
 	}
 
+	/**
+	 * Buden im Kartenausschnitt (Karte lädt beim Verschieben nach). Bis {@code limit} Treffer kommen sie einzeln,
+	 * darüber als Cluster (etwa {@value #CLUSTER_COLUMNS} Spalten über die Breite) – so bleibt die Antwort auch
+	 * bei ganz Deutschland klein.
+	 */
+	@GetMapping("/spots/area")
+	SpotDtos.SpotArea area(
+			@RequestParam @NotNull @DecimalMin("-90") @DecimalMax("90") Double south,
+			@RequestParam @NotNull @DecimalMin("-180") @DecimalMax("180") Double west,
+			@RequestParam @NotNull @DecimalMin("-90") @DecimalMax("90") Double north,
+			@RequestParam @NotNull @DecimalMin("-180") @DecimalMax("180") Double east,
+			@RequestParam(required = false) String category,
+			@RequestParam(defaultValue = "300") @Min(1) @Max(500) int limit, Authentication auth) {
+		if (south >= north || west >= east) {
+			throw new ResponseStatusException(HttpStatus.BAD_REQUEST,
+					"Ungültiger Ausschnitt: south < north und west < east erwartet");
+		}
+		SpotRepository.BoundingBox box = SpotRepository.BoundingBox.of(south, west, north, east);
+		String categoryCode = category == null || category.isBlank() ? null : category;
+		long total = repository.countSpotsInArea(box, categoryCode);
+		if (total <= limit) {
+			return new SpotDtos.SpotArea(total, repository.findSpotsInArea(box, categoryCode, limit, viewerId(auth)),
+					List.of());
+		}
+		double cellLon = clusterCell(east - west);
+		// Etwa quadratische Zellen auf der Karte (Mercator); Breite auf 5° gerundet, damit das Raster stabil bleibt
+		double midLat = Math.round((south + north) / 2 / 5) * 5.0;
+		double cellLat = cellLon * Math.max(Math.cos(Math.toRadians(midLat)), 0.1);
+		return new SpotDtos.SpotArea(total, List.of(),
+				repository.findClustersInArea(box, categoryCode, cellLat, cellLon));
+	}
+
+	static final int CLUSTER_COLUMNS = 6;
+
+	/** Zellbreite in Grad: Ausschnittsbreite / Spalten, auf eine Zweierpotenz gerundet (stabil beim Verschieben). */
+	static double clusterCell(double widthDegrees) {
+		double raw = widthDegrees / CLUSTER_COLUMNS;
+		return Math.pow(2, Math.round(Math.log(raw) / Math.log(2)));
+	}
+
 	@GetMapping("/spots/{id}")
 	SpotDetail spot(@PathVariable long id, Authentication auth) {
 		return detail(id, auth);

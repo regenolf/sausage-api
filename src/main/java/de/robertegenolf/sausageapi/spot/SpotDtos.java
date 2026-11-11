@@ -38,6 +38,17 @@ public final class SpotDtos {
 			String source, boolean verified) {
 	}
 
+	/**
+	 * Buden in einem Kartenausschnitt. {@code total}: alle Treffer im Ausschnitt. Bis zur angefragten Grenze stehen
+	 * sie einzeln in {@code spots} ({@code clusters} leer), darüber nur als {@code clusters} ({@code spots} leer).
+	 */
+	public record SpotArea(long total, List<SpotSummary> spots, List<SpotCluster> clusters) {
+	}
+
+	/** Mehrere Buden einer Rasterzelle, Position = Mittelwert ihrer Koordinaten. */
+	public record SpotCluster(double latitude, double longitude, long count) {
+	}
+
 	public record NearbySpot(long id, String categoryCode, String name, String city,
 			BigDecimal latitude, BigDecimal longitude, Double averageRating, long ratingCount,
 			double distanceKm, String coverPhotoUrl, String source, boolean verified) {
