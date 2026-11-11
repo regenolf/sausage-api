@@ -106,9 +106,11 @@ curl -s -d client_id=sausage-cli -d scope=openid http://localhost:8180/realms/sa
 | `DELETE` | `/api/users/me` | Konto löschen, in Keycloak und in der App: Bewertungen, Kommentare, Fotos werden gelöscht, eigene Spots anonymisiert; auch für gesperrte Konten 🔒 |
 | `GET` | `/api/categories` | Alle Kategorien |
 | `POST` | `/api/categories` | Kategorie anlegen 🔒 (nur Admin) |
-| `GET` | `/api/spots?category=&q=&page=&size=` | Spots als Liste, Suche in Name/Stadt; mit `size` seitenweise, Gesamtzahl im Header `X-Total-Count` |
+| `GET` | `/api/spots?category=&q=&sort=&source=&page=&size=` | Spots als Liste, Suche in Name/Stadt; `sort` = `name` (Standard), `newest` oder `rating` (gedämpfter Schnitt, Unbewertete zuletzt); `source` = z. B. `USER`; mit `size` seitenweise, Gesamtzahl im Header `X-Total-Count` |
 | `GET` | `/api/spots/nearby?latitude=&longitude=&radiusKm=&category=` | Umkreissuche, sortiert nach Entfernung (`distanceKm`) |
-| `GET` | `/api/spots/{id}` | Spot-Details inkl. Durchschnittsbewertung, Ersteller und `photos` |
+| `GET` | `/api/spots/{id}` | Spot-Details inkl. Durchschnittsbewertung, Ersteller, `coverPhotoId` und `photos` (Titelbild zuerst) |
+| `PUT` | `/api/spots/{id}/cover` | Titelbild wählen (`{"photoId": 12}`, `null` = erstes Foto) → Spot 🔒 (Ersteller oder Admin) |
+| `GET` | `/api/ratings/recent?limit=10&withComment=true` | Zuletzt abgegebene Bewertungen über alle Spots mit `spotId`, `spotName`, `city`, `categoryCode` (Startseite) |
 | `POST` | `/api/spots` | Spot anlegen 🔒 |
 | `PUT` | `/api/spots/{id}` | Spot bearbeiten 🔒 (nur Ersteller) |
 | `DELETE` | `/api/spots/{id}` | Spot inkl. Bewertungen/Kommentaren/Fotos löschen 🔒 (Admin; Ersteller nur, solange keine Beiträge anderer existieren, sonst 409) |
@@ -126,7 +128,7 @@ curl -s -d client_id=sausage-cli -d scope=openid http://localhost:8180/realms/sa
 | `POST` | `/api/spots/{id}/comments` | Kommentieren 🔒 |
 | `DELETE` | `/api/spots/{id}/comments/{commentId}` | Kommentar löschen 🔒 (Autor oder Admin) |
 
-Listen (`/api/spots`, `/api/spots/nearby`, `/api/users/me/spots`) enthalten `coverPhotoUrl`: das erste Foto als Vorschaubild (ohne Fotos von Nutzern, die man blockiert hat), sonst `null`.
+Listen (`/api/spots`, `/api/spots/nearby`, `/api/users/me/spots`) enthalten `coverPhotoUrl`: das gewählte Titelbild, sonst das erste Foto als Vorschaubild (ohne Fotos von Nutzern, die man blockiert hat), sonst `null`.
 
 Listen und Details enthalten außerdem `source` (`USER` = in der App angelegt, `OSM` = aus OpenStreetMap importiert) und
 `verified` (`false` = importiert und von der Moderation noch nicht geprüft). Details liefern bei importierten Spots
@@ -145,7 +147,7 @@ Moderations-Mails verschickt die API per SMTP (`SPRING_MAIL_HOST`, `_PORT`, `_US
 
 | Methode | Pfad | Beschreibung |
 |---|---|---|
-| `GET` | `/api/seo/spots/{id}` | HTML mit Titel, Beschreibung, Open-Graph-Bild (erstes Foto) und schema.org-`FoodEstablishment` (Adresse, Geo, Bewertung). nginx im Frontend leitet Crawler und Vorschau-Dienste (WhatsApp, Telegram, Facebook, Google …) von `/spots/{id}` hierher |
+| `GET` | `/api/seo/spots/{id}` | HTML mit Titel, Beschreibung, Open-Graph-Bild (Titelbild) und schema.org-`FoodEstablishment` (Adresse, Geo, Bewertung). nginx im Frontend leitet Crawler und Vorschau-Dienste (WhatsApp, Telegram, Facebook, Google …) von `/spots/{id}` hierher |
 | `GET` | `/api/seo/sitemap.xml` | Sitemap aller Spots, im Frontend unter `/sitemap.xml` |
 
 Absolute Adressen kommen aus `PUBLIC_URL` oder aus `X-Forwarded-Proto`/`Host`.
