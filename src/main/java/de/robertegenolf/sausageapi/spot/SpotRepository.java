@@ -30,6 +30,7 @@ class SpotRepository {
 			       u.username AS created_by, s.created_at, s.updated_at,
 			       s.source, s.verified, s.external_id, s.cover_photo_id AS chosen_cover_id,
 			       AVG(r.score)::float8 AS average_rating,
+			       COUNT(r.id) FILTER (WHERE r.score >= 4) AS recommend_count,
 			       COUNT(r.id) AS rating_count
 			FROM spot s
 			JOIN category c ON c.id = s.category_id
@@ -81,7 +82,7 @@ class SpotRepository {
 			rs.getString("zip_code"), rs.getString("city"),
 			rs.getBigDecimal("latitude"), rs.getBigDecimal("longitude"),
 			rs.getString("opening_hours"),
-			averageRating(rs), rs.getLong("rating_count"),
+			averageRating(rs), rs.getLong("rating_count"), rs.getLong("recommend_count"),
 			rs.getString("created_by"),
 			rs.getTimestamp("created_at").toInstant(),
 			rs.getTimestamp("updated_at").toInstant(),
@@ -96,6 +97,11 @@ class SpotRepository {
 	SpotRepository(JdbcClient jdbc, PhotoRepository photos) {
 		this.jdbc = jdbc;
 		this.photos = photos;
+	}
+
+	private String recentCover(java.sql.ResultSet rs) throws java.sql.SQLException {
+		long photoId = rs.getLong("cover_photo_id");
+		return rs.wasNull() ? null : photos.url(rs.getLong("spot_id"), photoId);
 	}
 
 	private String coverPhotoUrl(java.sql.ResultSet rs) throws java.sql.SQLException {
@@ -398,22 +404,29 @@ class SpotRepository {
 	List<SpotDtos.RecentRating> findRecentRatings(int limit, boolean withComment, long viewerId) {
 		return jdbc.sql("""
 				SELECT r.id, r.score, r.comment, r.created_at, u.username,
-				       s.id AS spot_id, s.name AS spot_name, s.city, c.code AS category_code
+				       s.id AS spot_id, s.name AS spot_name, s.city, c.code AS category_code,
+				       cover.id AS cover_photo_id
 				FROM rating r
 				JOIN app_user u ON u.id = r.user_id
 				JOIN spot s ON s.id = r.spot_id
 				JOIN category c ON c.id = s.category_id
-				WHERE (NOT :withComment OR r.comment IS NOT NULL) AND %s
+				LEFT JOIN LATERAL (
+				    SELECT p.id FROM spot_photo p
+				    WHERE p.spot_id = s.id AND %2$s
+				    ORDER BY CASE WHEN p.id = s.cover_photo_id THEN 0 ELSE 1 END, p.created_at, p.id
+				    LIMIT 1
+				) cover ON true
+				WHERE (NOT :withComment OR r.comment IS NOT NULL) AND %1$s
 				ORDER BY r.created_at DESC, r.id DESC
 				LIMIT :limit
-				""".formatted(NOT_BLOCKED.formatted("r.user_id")))
+				""".formatted(NOT_BLOCKED.formatted("r.user_id"), NOT_BLOCKED.formatted("p.user_id")))
 				.param("withComment", withComment)
 				.param("viewerId", viewerId)
 				.param("limit", limit)
 				.query((rs, n) -> new SpotDtos.RecentRating(rs.getLong("id"), rs.getInt("score"),
 						rs.getString("comment"), rs.getString("username"), rs.getTimestamp("created_at").toInstant(),
 						rs.getLong("spot_id"), rs.getString("spot_name"), rs.getString("city"),
-						rs.getString("category_code")))
+						rs.getString("category_code"), recentCover(rs)))
 				.list();
 	}
 

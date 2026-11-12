@@ -1040,6 +1040,13 @@ class SpotApiTests {
 				.andExpect(jsonPath("$[2].id").value(unrated));
 		mvc.perform(get("/api/spots").param("q", prefix).param("sort", "quatsch"))
 				.andExpect(status().isBadRequest());
+		// „x % empfehlen“: Bewertungen ab 4 Sternen
+		mvc.perform(get("/api/spots/" + older))
+				.andExpect(jsonPath("$.ratingCount").value(2))
+				.andExpect(jsonPath("$.recommendCount").value(2));
+		mvc.perform(get("/api/spots/" + newer))
+				.andExpect(jsonPath("$.ratingCount").value(1))
+				.andExpect(jsonPath("$.recommendCount").value(0));
 		mvc.perform(get("/api/spots").param("q", prefix).param("source", "user"))
 				.andExpect(header().string("X-Total-Count", "3"));
 		mvc.perform(get("/api/spots").param("q", prefix).param("source", "OSM"))
@@ -1053,6 +1060,7 @@ class SpotApiTests {
 		register(author);
 		register(viewer);
 		long spotId = createSpot(author, "Frisch " + author, 51.0, 7.0);
+		long photoId = uploadPhoto(spotId, author);
 		mvc.perform(post("/api/spots/" + spotId + "/ratings").with(login(author)).contentType(MediaType.APPLICATION_JSON)
 						.content("{\"score\":4,\"comment\":\"Knusprig, guter Senf\"}"))
 				.andExpect(status().isOk());
@@ -1061,7 +1069,9 @@ class SpotApiTests {
 				.andExpect(status().isOk())
 				.andExpect(jsonPath("$[?(@.author == '" + author + "')].spotId").value(org.hamcrest.Matchers.contains((int) spotId)))
 				.andExpect(jsonPath("$[?(@.author == '" + author + "')].comment").value(org.hamcrest.Matchers.contains("Knusprig, guter Senf")))
-				.andExpect(jsonPath("$[?(@.author == '" + author + "')].categoryCode").value(org.hamcrest.Matchers.contains("BRATWURST")));
+				.andExpect(jsonPath("$[?(@.author == '" + author + "')].categoryCode").value(org.hamcrest.Matchers.contains("BRATWURST")))
+				.andExpect(jsonPath("$[?(@.author == '" + author + "')].coverPhotoUrl")
+						.value(org.hamcrest.Matchers.contains(org.hamcrest.Matchers.endsWith("/spots/" + spotId + "/photos/" + photoId))));
 
 		// Blockierte Nutzer tauchen nicht auf
 		mvc.perform(post("/api/users/me/blocks").with(login(viewer)).contentType(MediaType.APPLICATION_JSON)
