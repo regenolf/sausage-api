@@ -108,9 +108,9 @@ curl -s -d client_id=sausage-cli -d scope=openid http://localhost:8180/realms/sa
 | `POST` | `/api/categories` | Kategorie anlegen 🔒 (nur Admin) |
 | `GET` | `/api/spots?category=&q=&sort=&source=&page=&size=` | Spots als Liste, Suche in Name/Stadt; `sort` = `name` (Standard), `newest` oder `rating` (gedämpfter Schnitt, Unbewertete zuletzt); `source` = z. B. `USER`; mit `size` seitenweise, Gesamtzahl im Header `X-Total-Count` |
 | `GET` | `/api/spots/nearby?latitude=&longitude=&radiusKm=&category=` | Umkreissuche, sortiert nach Entfernung (`distanceKm`) |
-| `GET` | `/api/spots/{id}` | Spot-Details inkl. Durchschnittsbewertung, Ersteller, `coverPhotoId` und `photos` (Titelbild zuerst) |
+| `GET` | `/api/spots/{id}` | Spot-Details inkl. Durchschnittsbewertung, `recommendCount` (Bewertungen ab 4 Sternen), Ersteller, `coverPhotoId` und `photos` (Titelbild zuerst) |
 | `PUT` | `/api/spots/{id}/cover` | Titelbild wählen (`{"photoId": 12}`, `null` = erstes Foto) → Spot 🔒 (Ersteller oder Admin) |
-| `GET` | `/api/ratings/recent?limit=10&withComment=true` | Zuletzt abgegebene Bewertungen über alle Spots mit `spotId`, `spotName`, `city`, `categoryCode` (Startseite) |
+| `GET` | `/api/ratings/recent?limit=10&withComment=true` | Zuletzt abgegebene Bewertungen über alle Spots mit `spotId`, `spotName`, `city`, `categoryCode` und `coverPhotoUrl` (Startseite) |
 | `POST` | `/api/spots` | Spot anlegen 🔒 |
 | `PUT` | `/api/spots/{id}` | Spot bearbeiten 🔒 (nur Ersteller) |
 | `DELETE` | `/api/spots/{id}` | Spot inkl. Bewertungen/Kommentaren/Fotos löschen 🔒 (Admin; Ersteller nur, solange keine Beiträge anderer existieren, sonst 409) |

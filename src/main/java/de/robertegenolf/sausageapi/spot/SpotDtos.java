@@ -63,12 +63,14 @@ public final class SpotDtos {
 	public record SpotDetail(long id, String categoryCode, String name, String description,
 			String street, String houseNumber, String zipCode, String city,
 			BigDecimal latitude, BigDecimal longitude, String openingHours,
-			Double averageRating, long ratingCount, String createdBy, Instant createdAt, Instant updatedAt,
-			String source, boolean verified, String sourceUrl, Long coverPhotoId, List<SpotPhoto> photos) {
+			Double averageRating, long ratingCount, long recommendCount, String createdBy, Instant createdAt,
+			Instant updatedAt, String source, boolean verified, String sourceUrl, Long coverPhotoId,
+			List<SpotPhoto> photos) {
 
 		SpotDetail withPhotos(List<SpotPhoto> photos) {
 			return new SpotDetail(id, categoryCode, name, description, street, houseNumber, zipCode, city,
-					latitude, longitude, openingHours, averageRating, ratingCount, createdBy, createdAt, updatedAt,
+					latitude, longitude, openingHours, averageRating, ratingCount, recommendCount, createdBy, createdAt,
+					updatedAt,
 					source, verified, sourceUrl, coverPhotoId, photos);
 		}
 	}
@@ -92,9 +94,9 @@ public final class SpotDtos {
 	public record CoverRequest(Long photoId) {
 	}
 
-	/** Bewertung für die Startseite („Frisch bewertet“), mit der bewerteten Bude. */
+	/** Bewertung für die Startseite („Aus der Community“), mit der bewerteten Bude und deren Titelbild. */
 	public record RecentRating(long id, int score, String comment, String author, Instant createdAt,
-			long spotId, String spotName, String city, String categoryCode) {
+			long spotId, String spotName, String city, String categoryCode, String coverPhotoUrl) {
 	}
 
 	/** Bewertung eines Users: Sterne plus optionaler Kommentar. {@code author} ist der Benutzername (= JWT-sub). */
