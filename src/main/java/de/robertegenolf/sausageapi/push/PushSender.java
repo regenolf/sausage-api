@@ -44,7 +44,7 @@ class PushSender {
 	/** Ergebnis je Token: zugestellt, Token ungültig (löschen) oder vorübergehender Fehler. */
 	enum Result { SENT, INVALID_TOKEN, FAILED, DISABLED }
 
-	private record Credentials(String projectId, String clientEmail, RSAPrivateKey key, String tokenUri) {
+	record Credentials(String projectId, String clientEmail, RSAPrivateKey key, String tokenUri) {
 	}
 
 	private final Credentials credentials;
