@@ -10,7 +10,7 @@ import java.util.Optional;
 @Repository
 class ReportRepository {
 
-	enum TargetType { SPOT, RATING, COMMENT, PHOTO }
+	enum TargetType { SPOT, RATING, COMMENT, PHOTO, LIST }
 
 	enum Reason { ILLEGAL, INSULT, SPAM, PRIVACY, COPYRIGHT, WRONG_INFO, OTHER }
 
@@ -63,10 +63,15 @@ class ReportRepository {
 					SELECT p.spot_id, p.user_id AS author_id, u.username AS author,
 					       '/api/spots/' || p.spot_id || '/photos/' || p.id AS preview
 					FROM spot_photo p JOIN app_user u ON u.id = p.user_id WHERE p.id = :id""";
+			// Nur öffentliche Listen sind für andere sichtbar und damit meldbar
+			case LIST -> """
+					SELECT NULL::bigint AS spot_id, l.user_id AS author_id, u.username AS author,
+					       'Liste: ' || l.title || COALESCE(' – ' || l.description, '') AS preview
+					FROM spot_list l JOIN app_user u ON u.id = l.user_id WHERE l.id = :id AND l.is_public""";
 		};
 		return jdbc.sql(sql)
 				.param("id", id)
-				.query((rs, n) -> new Target(rs.getLong("spot_id"), (Long) rs.getObject("author_id", Long.class),
+				.query((rs, n) -> new Target((Long) rs.getObject("spot_id", Long.class), (Long) rs.getObject("author_id", Long.class),
 						rs.getString("author"), rs.getString("preview")))
 				.optional();
 	}
@@ -78,6 +83,7 @@ class ReportRepository {
 			case RATING -> "rating";
 			case COMMENT -> "comment";
 			case PHOTO -> "spot_photo";
+			case LIST -> "spot_list";
 		};
 		jdbc.sql("DELETE FROM " + table + " WHERE id = :id").param("id", id).update();
 	}

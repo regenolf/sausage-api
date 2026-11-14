@@ -98,6 +98,7 @@ class ModerationNotifier {
 			case RATING -> "Bewertung";
 			case COMMENT -> "Kommentar";
 			case PHOTO -> "Foto";
+			case LIST -> "Liste";
 		};
 	}
 

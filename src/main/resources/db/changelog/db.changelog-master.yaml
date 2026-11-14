@@ -65,3 +65,18 @@ databaseChangeLog:
   - include:
       file: db/changelog/changes/022-spot-cover-photo.sql
       relativeToChangelogFile: false
+  - include:
+      file: db/changelog/changes/023-spot-issue.sql
+      relativeToChangelogFile: false
+  - include:
+      file: db/changelog/changes/024-rating-details.sql
+      relativeToChangelogFile: false
+  - include:
+      file: db/changelog/changes/025-check-in.sql
+      relativeToChangelogFile: false
+  - include:
+      file: db/changelog/changes/026-spot-list.sql
+      relativeToChangelogFile: false
+  - include:
+      file: db/changelog/changes/027-push-device.sql
+      relativeToChangelogFile: false

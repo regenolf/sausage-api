@@ -37,6 +37,8 @@ class UserExportRepository {
 				WHERE s.created_by = :id ORDER BY s.id""", userId));
 		data.put("bewertungen", rows("""
 				SELECT r.id, r.spot_id, s.name AS spot, r.score AS sterne, r.comment AS kommentar,
+				       r.sausage_score AS note_wurst, r.bun_score AS note_broetchen, r.mustard_score AS note_senf,
+				       r.value_score AS note_preis_leistung, r.price_cents AS preis_cent,
 				       to_char(r.created_at, 'YYYY-MM-DD"T"HH24:MI:SS') AS erstellt_am
 				FROM rating r JOIN spot s ON s.id = r.spot_id
 				WHERE r.user_id = :id ORDER BY r.id""", userId));
@@ -63,6 +65,29 @@ class UserExportRepository {
 				       to_char(decided_at, 'YYYY-MM-DD"T"HH24:MI:SS') AS entschieden_am
 				FROM report WHERE target_author_id = :id
 				ORDER BY target_type, target_id, created_at DESC""", userId));
+		data.put("wurst_tagebuch", rows("""
+				SELECT ci.id, ci.spot_id, s.name AS spot, to_char(ci.eaten_on, 'YYYY-MM-DD') AS gegessen_am,
+				       to_char(ci.created_at, 'YYYY-MM-DD"T"HH24:MI:SS') AS erstellt_am
+				FROM check_in ci JOIN spot s ON s.id = ci.spot_id
+				WHERE ci.user_id = :id ORDER BY ci.id""", userId));
+		data.put("listen", rows("""
+				SELECT l.id, l.title AS titel, l.description AS beschreibung, l.is_public AS oeffentlich,
+				       (SELECT string_agg(s.name || ' (' || s.id || ')', ', ' ORDER BY i.added_at)
+				        FROM spot_list_item i JOIN spot s ON s.id = i.spot_id WHERE i.list_id = l.id) AS buden,
+				       to_char(l.created_at, 'YYYY-MM-DD"T"HH24:MI:SS') AS erstellt_am,
+				       to_char(l.updated_at, 'YYYY-MM-DD"T"HH24:MI:SS') AS geaendert_am
+				FROM spot_list l WHERE l.user_id = :id ORDER BY l.id""", userId));
+		data.put("hinweise_zu_buden", rows("""
+				SELECT i.id, i.spot_id, s.name AS spot, i.type AS art, i.message AS nachricht, i.status,
+				       to_char(i.created_at, 'YYYY-MM-DD"T"HH24:MI:SS') AS erstellt_am
+				FROM spot_issue i JOIN spot s ON s.id = i.spot_id
+				WHERE i.user_id = :id ORDER BY i.id""", userId));
+		// Push-Token nur gekürzt: Sie sind Gerätekennungen und für die Auskunft ohne Nutzen
+		data.put("geraete_fuer_benachrichtigungen", rows("""
+				SELECT platform AS plattform, '…' || right(token, 8) AS token_ende,
+				       to_char(created_at, 'YYYY-MM-DD"T"HH24:MI:SS') AS erstellt_am,
+				       to_char(last_seen_at, 'YYYY-MM-DD"T"HH24:MI:SS') AS zuletzt_gesehen
+				FROM push_device WHERE user_id = :id ORDER BY id""", userId));
 		data.put("blockierte_nutzer", rows("""
 				SELECT u.username, to_char(b.created_at, 'YYYY-MM-DD"T"HH24:MI:SS') AS blockiert_am
 				FROM user_block b JOIN app_user u ON u.id = b.blocked_id
