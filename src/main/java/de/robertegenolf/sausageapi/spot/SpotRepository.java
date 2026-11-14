@@ -224,26 +224,43 @@ class SpotRepository {
 				.list();
 	}
 
-	/** Bedingung für Buden im Ausschnitt (nutzt idx_spot_coordinates) und optional einer Kategorie. */
+	/**
+	 * Filter der Karte: optional eine Kategorie und die Schnellfilter der App („Top bewertet“ = Schnitt ab
+	 * {@link #TOP_RATED_MIN} Sternen, „Mit Foto“, „Geprüft“). Gilt für einzelne Buden und Cluster gleichermaßen.
+	 */
+	record AreaFilter(String categoryCode, boolean topRated, boolean withPhoto, boolean verified) {
+	}
+
+	/** Ab diesem Schnitt gilt eine Bude als „top bewertet“ (wie in der App). */
+	static final int TOP_RATED_MIN = 4;
+
+	/**
+	 * Bedingung für Buden im Ausschnitt (nutzt idx_spot_coordinates) plus {@link AreaFilter}. Bewertungen und Fotos
+	 * als Unterabfragen, damit Zählung und Cluster ohne Join auskommen.
+	 */
 	private static final String AREA_FILTER = """
 			WHERE (CAST(:categoryCode AS varchar) IS NULL OR c.code = :categoryCode)
 			  AND s.latitude BETWEEN :minLat AND :maxLat
 			  AND s.longitude BETWEEN :minLon AND :maxLon
-			""";
+			  AND (NOT CAST(:verifiedOnly AS boolean) OR s.verified IS TRUE)
+			  AND (NOT CAST(:withPhoto AS boolean) OR EXISTS (SELECT 1 FROM spot_photo fp WHERE fp.spot_id = s.id))
+			  AND (NOT CAST(:topRated AS boolean)
+			       OR (SELECT AVG(fr.score) FROM rating fr WHERE fr.spot_id = s.id) >= %d)
+			""".formatted(TOP_RATED_MIN);
 
-	long countSpotsInArea(BoundingBox box, String categoryCode) {
+	long countSpotsInArea(BoundingBox box, AreaFilter filter) {
 		return jdbc.sql("SELECT COUNT(*) FROM spot s JOIN category c ON c.id = s.category_id\n" + AREA_FILTER)
-				.params(areaParams(box, categoryCode))
+				.params(areaParams(box, filter))
 				.query(Long.class)
 				.single();
 	}
 
 	/** Buden im Ausschnitt, bestbewertete zuerst – {@code limit} begrenzt nur zur Sicherheit. */
-	List<SpotSummary> findSpotsInArea(BoundingBox box, String categoryCode, int limit, long viewerId) {
+	List<SpotSummary> findSpotsInArea(BoundingBox box, AreaFilter filter, int limit, long viewerId) {
 		String sql = LIST_SELECT + AREA_FILTER + LIST_GROUP_BY + "ORDER BY " + SpotSort.RATING.orderBy
 				+ "\nLIMIT :limit\n";
 		return jdbc.sql(sql)
-				.params(areaParams(box, categoryCode))
+				.params(areaParams(box, filter))
 				.param("limit", limit)
 				.param("viewerId", viewerId)
 				.query(spotSummary)
@@ -254,7 +271,7 @@ class SpotRepository {
 	 * Fasst die Buden im Ausschnitt in einem Raster zusammen. Das Raster hängt an festen Koordinaten (nicht am
 	 * Ausschnitt), damit Cluster beim Verschieben der Karte nicht springen; {@code cellLat}/{@code cellLon} in Grad.
 	 */
-	List<SpotDtos.SpotCluster> findClustersInArea(BoundingBox box, String categoryCode, double cellLat,
+	List<SpotDtos.SpotCluster> findClustersInArea(BoundingBox box, AreaFilter filter, double cellLat,
 			double cellLon) {
 		return jdbc.sql("""
 				SELECT AVG(s.latitude)::float8 AS latitude, AVG(s.longitude)::float8 AS longitude, COUNT(*) AS count
@@ -264,7 +281,7 @@ class SpotRepository {
 				GROUP BY FLOOR(s.latitude / :cellLat), FLOOR(s.longitude / :cellLon)
 				ORDER BY count DESC
 				""")
-				.params(areaParams(box, categoryCode))
+				.params(areaParams(box, filter))
 				.param("cellLat", BigDecimal.valueOf(cellLat))
 				.param("cellLon", BigDecimal.valueOf(cellLon))
 				.query((rs, n) -> new SpotDtos.SpotCluster(rs.getDouble("latitude"), rs.getDouble("longitude"),
@@ -272,9 +289,12 @@ class SpotRepository {
 				.list();
 	}
 
-	private static Map<String, Object> areaParams(BoundingBox box, String categoryCode) {
+	private static Map<String, Object> areaParams(BoundingBox box, AreaFilter filter) {
 		Map<String, Object> params = new HashMap<>();
-		params.put("categoryCode", categoryCode);
+		params.put("categoryCode", filter.categoryCode());
+		params.put("topRated", filter.topRated());
+		params.put("withPhoto", filter.withPhoto());
+		params.put("verifiedOnly", filter.verified());
 		params.put("minLat", box.minLat());
 		params.put("maxLat", box.maxLat());
 		params.put("minLon", box.minLon());
