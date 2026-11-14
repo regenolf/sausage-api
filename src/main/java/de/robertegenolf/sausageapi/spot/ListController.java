@@ -35,8 +35,13 @@ import java.util.Objects;
 @RequestMapping("/api")
 class ListController {
 
+	/** {@code isPublic} fehlt = privat. */
 	record ListRequest(@NotBlank @Size(max = 100) String title, @Size(max = 500) String description,
-			boolean isPublic) {
+			Boolean isPublic) {
+
+		boolean visible() {
+			return Boolean.TRUE.equals(isPublic);
+		}
 	}
 
 	/** {@code containsSpot}: nur bei {@code GET /users/me/lists?spotId=…} gesetzt. */
@@ -74,7 +79,7 @@ class ListController {
 			throw new ResponseStatusException(HttpStatus.CONFLICT,
 					"Du hast schon " + ListRepository.MAX_LISTS_PER_USER + " Listen – lösche eine, um eine neue anzulegen");
 		}
-		long id = lists.create(userId, request.title().trim(), blankToNull(request.description()), request.isPublic());
+		long id = lists.create(userId, request.title().trim(), blankToNull(request.description()), request.visible());
 		return ResponseEntity.created(URI.create("/api/lists/" + id)).body(summary(lists.find(id).orElseThrow()));
 	}
 
@@ -95,7 +100,7 @@ class ListController {
 	@PutMapping("/lists/{id}")
 	ListSummary update(@PathVariable long id, @Valid @RequestBody ListRequest request, Authentication auth) {
 		requireOwnList(id, auth);
-		lists.update(id, request.title().trim(), blankToNull(request.description()), request.isPublic());
+		lists.update(id, request.title().trim(), blankToNull(request.description()), request.visible());
 		return summary(lists.find(id).orElseThrow());
 	}
 

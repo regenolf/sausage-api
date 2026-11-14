@@ -42,7 +42,11 @@ class IssueController {
 	 * {@code RESOLVED}: erledigt (Bude korrigiert oder gelöscht), {@code REJECTED}: unbegründet.
 	 * {@code allForSpot}: alle offenen Hinweise zu dieser Bude gleich mit entscheiden.
 	 */
-	record DecisionRequest(@NotNull Status status, boolean allForSpot) {
+	record DecisionRequest(@NotNull Status status, Boolean allForSpot) {
+
+		boolean forWholeSpot() {
+			return Boolean.TRUE.equals(allForSpot);
+		}
 	}
 
 	private final IssueRepository issues;
@@ -93,10 +97,10 @@ class IssueController {
 		}
 		Status current = issues.findStatus(id)
 				.orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "Hinweis " + id + " nicht gefunden"));
-		if (current != Status.OPEN && !request.allForSpot()) {
+		if (current != Status.OPEN && !request.forWholeSpot()) {
 			throw new ResponseStatusException(HttpStatus.CONFLICT, "Hinweis " + id + " ist bereits entschieden");
 		}
-		issues.decide(id, request.status(), currentUserId(auth), request.allForSpot());
+		issues.decide(id, request.status(), currentUserId(auth), request.forWholeSpot());
 		return ResponseEntity.noContent().build();
 	}
 
