@@ -119,7 +119,8 @@ class SpotController {
 	/**
 	 * Buden im Kartenausschnitt (Karte lädt beim Verschieben nach). Bis {@code limit} Treffer kommen sie einzeln,
 	 * darüber als Cluster (etwa {@value #CLUSTER_COLUMNS} Spalten über die Breite) – so bleibt die Antwort auch
-	 * bei ganz Deutschland klein.
+	 * bei ganz Deutschland klein. Die Schnellfilter ({@code topRated}, {@code withPhoto}, {@code verified}) wirken
+	 * auf beides.
 	 */
 	@GetMapping("/spots/area")
 	SpotDtos.SpotArea area(
@@ -128,6 +129,9 @@ class SpotController {
 			@RequestParam @NotNull @DecimalMin("-90") @DecimalMax("90") Double north,
 			@RequestParam @NotNull @DecimalMin("-180") @DecimalMax("180") Double east,
 			@RequestParam(required = false) String category,
+			@RequestParam(defaultValue = "false") boolean topRated,
+			@RequestParam(defaultValue = "false") boolean withPhoto,
+			@RequestParam(defaultValue = "false") boolean verified,
 			@RequestParam(defaultValue = "300") @Min(1) @Max(500) int limit, Authentication auth) {
 		if (south >= north || west >= east) {
 			throw new ResponseStatusException(HttpStatus.BAD_REQUEST,
@@ -135,9 +139,10 @@ class SpotController {
 		}
 		SpotRepository.BoundingBox box = SpotRepository.BoundingBox.of(south, west, north, east);
 		String categoryCode = category == null || category.isBlank() ? null : category;
-		long total = repository.countSpotsInArea(box, categoryCode);
+		SpotRepository.AreaFilter filter = new SpotRepository.AreaFilter(categoryCode, topRated, withPhoto, verified);
+		long total = repository.countSpotsInArea(box, filter);
 		if (total <= limit) {
-			return new SpotDtos.SpotArea(total, repository.findSpotsInArea(box, categoryCode, limit, viewerId(auth)),
+			return new SpotDtos.SpotArea(total, repository.findSpotsInArea(box, filter, limit, viewerId(auth)),
 					List.of());
 		}
 		double cellLon = clusterCell(east - west);
@@ -145,7 +150,7 @@ class SpotController {
 		double midLat = Math.round((south + north) / 2 / 5) * 5.0;
 		double cellLat = cellLon * Math.max(Math.cos(Math.toRadians(midLat)), 0.1);
 		return new SpotDtos.SpotArea(total, List.of(),
-				repository.findClustersInArea(box, categoryCode, cellLat, cellLon));
+				repository.findClustersInArea(box, filter, cellLat, cellLon));
 	}
 
 	static final int CLUSTER_COLUMNS = 6;

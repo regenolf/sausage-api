@@ -298,6 +298,44 @@ class SpotApiTests {
 				.andExpect(jsonPath("$.clusters[0].count").value(2))
 				.andExpect(jsonPath("$.clusters[1].count").value(1));
 
+		// Schnellfilter: A top bewertet, B mit Foto (aber schwach bewertet), C ungeprüft
+		mvc.perform(post("/api/spots/" + a + "/ratings").with(login(username))
+						.contentType(MediaType.APPLICATION_JSON).content("{\"score\":5}"))
+				.andExpect(status().isOk());
+		mvc.perform(post("/api/spots/" + b + "/ratings").with(login(username))
+						.contentType(MediaType.APPLICATION_JSON).content("{\"score\":2}"))
+				.andExpect(status().isOk());
+		long userId = jdbc.sql("SELECT id FROM app_user WHERE username = :u").param("u", username)
+				.query(Long.class).single();
+		jdbc.sql("""
+				INSERT INTO spot_photo (spot_id, user_id, content_type, size_bytes, data)
+				VALUES (:spot, :user, 'image/jpeg', 1, :data)
+				""").param("spot", b).param("user", userId).param("data", new byte[] { 1 }).update();
+		jdbc.sql("UPDATE spot SET verified = FALSE WHERE id = :id").param("id", c).update();
+
+		mvc.perform(get("/api/spots/area").param("south", "-31").param("west", "120")
+						.param("north", "-30").param("east", "121").param("topRated", "true"))
+				.andExpect(status().isOk())
+				.andExpect(jsonPath("$.total").value(1))
+				.andExpect(jsonPath("$.spots[0].id").value(a));
+		mvc.perform(get("/api/spots/area").param("south", "-31").param("west", "120")
+						.param("north", "-30").param("east", "121").param("withPhoto", "true"))
+				.andExpect(status().isOk())
+				.andExpect(jsonPath("$.total").value(1))
+				.andExpect(jsonPath("$.spots[0].id").value(b));
+		mvc.perform(get("/api/spots/area").param("south", "-31").param("west", "120")
+						.param("north", "-30").param("east", "121").param("verified", "true"))
+				.andExpect(status().isOk())
+				.andExpect(jsonPath("$.total").value(2))
+				.andExpect(jsonPath("$.spots[?(@.id == " + c + ")]").doesNotExist());
+		// Auch die Cluster zählen nur, was zum Filter passt: A und B in einer Zelle, C fällt weg
+		mvc.perform(get("/api/spots/area").param("south", "-31").param("west", "120")
+						.param("north", "-30").param("east", "121").param("verified", "true").param("limit", "1"))
+				.andExpect(status().isOk())
+				.andExpect(jsonPath("$.total").value(2))
+				.andExpect(jsonPath("$.clusters.length()").value(1))
+				.andExpect(jsonPath("$.clusters[0].count").value(2));
+
 		mvc.perform(get("/api/spots/area").param("south", "-31").param("west", "120")
 						.param("north", "-30").param("east", "121").param("category", "GIBTS_NICHT"))
 				.andExpect(status().isOk())
