@@ -15,11 +15,13 @@ import java.util.Map;
 class PushNotifier {
 
 	private final PushDeviceRepository devices;
-	private final PushSender sender;
+	private final PushSender fcm;
+	private final ApnsSender apns;
 
-	PushNotifier(PushDeviceRepository devices, PushSender sender) {
+	PushNotifier(PushDeviceRepository devices, PushSender fcm, ApnsSender apns) {
 		this.devices = devices;
-		this.sender = sender;
+		this.fcm = fcm;
+		this.apns = apns;
 	}
 
 	@TransactionalEventListener(phase = TransactionPhase.AFTER_COMMIT, fallbackExecution = true)
@@ -33,14 +35,18 @@ class PushNotifier {
 	}
 
 	void notifyUser(long userId, String title, String body, Map<String, String> data) {
-		var tokens = devices.tokens(userId);
-		if (tokens.isEmpty()) {
+		var targets = devices.devices(userId);
+		if (targets.isEmpty()) {
 			return;
 		}
 		Thread.ofVirtual().name("push").start(() -> {
-			for (String token : tokens) {
-				if (sender.send(token, title, body, data) == PushSender.Result.INVALID_TOKEN) {
-					devices.removeToken(token);
+			for (PushDeviceRepository.Device device : targets) {
+				// iOS: APNs-Token direkt an Apple, Android: FCM-Token über Firebase
+				PushSender.Result result = device.platform() == PushDeviceRepository.Platform.IOS
+						? apns.send(device.token(), title, body, data)
+						: fcm.send(device.token(), title, body, data);
+				if (result == PushSender.Result.INVALID_TOKEN) {
+					devices.removeToken(device.token());
 				}
 			}
 		});

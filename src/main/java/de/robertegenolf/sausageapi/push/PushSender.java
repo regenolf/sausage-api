@@ -26,8 +26,8 @@ import java.util.Date;
 import java.util.Map;
 
 /**
- * Versendet Push-Nachrichten über Firebase Cloud Messaging (HTTP v1) – für Android direkt, für iOS über den in
- * Firebase hinterlegten APNs-Schlüssel. Konfiguriert über {@code FIREBASE_CREDENTIALS_JSON} (Inhalt des
+ * Versendet Push-Nachrichten an Android über Firebase Cloud Messaging (HTTP v1); iPhones bekommen sie direkt von
+ * Apple, siehe {@link ApnsSender}. Konfiguriert über {@code FIREBASE_CREDENTIALS_JSON} (Inhalt des
  * JSON-Schlüssels eines Dienstkontos mit der Rolle „Firebase Cloud Messaging API Admin“). Ohne Schlüssel werden
  * Nachrichten nur protokolliert – die App funktioniert unverändert.
  * <p>
@@ -56,7 +56,7 @@ class PushSender {
 		this.credentials = credentialsJson == null || credentialsJson.isBlank() ? null : parse(credentialsJson);
 		this.http = RestClient.create();
 		if (credentials == null) {
-			log.info("Push-Nachrichten deaktiviert (FIREBASE_CREDENTIALS_JSON nicht gesetzt)");
+			log.info("Push an Android deaktiviert (FIREBASE_CREDENTIALS_JSON nicht gesetzt)");
 		}
 	}
 

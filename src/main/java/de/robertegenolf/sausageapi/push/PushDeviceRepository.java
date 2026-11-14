@@ -51,10 +51,13 @@ class PushDeviceRepository {
 		jdbc.sql("DELETE FROM push_device WHERE token = :token").param("token", token).update();
 	}
 
-	List<String> tokens(long userId) {
-		return jdbc.sql("SELECT token FROM push_device WHERE user_id = :userId")
+	record Device(String token, Platform platform) {
+	}
+
+	List<Device> devices(long userId) {
+		return jdbc.sql("SELECT token, platform FROM push_device WHERE user_id = :userId")
 				.param("userId", userId)
-				.query(String.class)
+				.query((rs, n) -> new Device(rs.getString("token"), Platform.valueOf(rs.getString("platform"))))
 				.list();
 	}
 }
