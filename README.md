@@ -65,6 +65,9 @@ sausage-app macht dasselbe für die Web-App. Beide Repos deployen unabhängig vo
 | `API_DOCS_ENABLED` | `true` (Swagger UI und `/v3/api-docs`; im Produktions-Setup `false`) |
 | `app.rate-limit.writes-per-hour` | `200` Schreibzugriffe (Anlegen/Ändern/Löschen) pro User und Stunde |
 | `app.rate-limit.reports-per-hour` | `30` Meldungen pro IP und Stunde |
+| `FIREBASE_CREDENTIALS_JSON` | leer – Push an Android über Firebase Cloud Messaging: Inhalt des JSON-Schlüssels eines Dienstkontos (Firebase → Projekteinstellungen → Dienstkonten); leer = nur protokolliert |
+| `APNS_KEY_P8` / `APNS_KEY_ID` / `APNS_TEAM_ID` | leer – Push an iPhones direkt über Apple: Inhalt der .p8-Datei, Schlüssel-ID und Team-ID (developer.apple.com → Keys, „Apple Push Notifications service“) |
+| `APNS_TOPIC` / `APNS_SANDBOX` | `de.wurstweiser.app` / `false` (TestFlight und App Store = Produktion; nur für Builds direkt aus Xcode `true`) |
 | `CORS_ALLOWED_ORIGINS` | `http://localhost:8100,http://localhost:4200,capacitor://localhost,https://localhost,http://localhost:3000,http://localhost:5173` |
 
 API-Doku (Swagger UI): http://localhost:8080/swagger-ui.html
@@ -108,14 +111,14 @@ curl -s -d client_id=sausage-cli -d scope=openid http://localhost:8180/realms/sa
 | `POST` | `/api/categories` | Kategorie anlegen 🔒 (nur Admin) |
 | `GET` | `/api/spots?category=&q=&sort=&source=&page=&size=` | Spots als Liste, Suche in Name/Stadt; `sort` = `name` (Standard), `newest` oder `rating` (gedämpfter Schnitt, Unbewertete zuletzt); `source` = z. B. `USER`; mit `size` seitenweise, Gesamtzahl im Header `X-Total-Count` |
 | `GET` | `/api/spots/nearby?latitude=&longitude=&radiusKm=&category=` | Umkreissuche, sortiert nach Entfernung (`distanceKm`) |
-| `GET` | `/api/spots/{id}` | Spot-Details inkl. Durchschnittsbewertung, `recommendCount` (Bewertungen ab 4 Sternen), Ersteller, `coverPhotoId` und `photos` (Titelbild zuerst) |
+| `GET` | `/api/spots/{id}` | Spot-Details inkl. Durchschnittsbewertung, `recommendCount` (Bewertungen ab 4 Sternen), `subScores` (Schnitt der Teilnoten), `priceCents` (Median der Preisangaben der letzten zwei Jahre) mit `priceCount`, `openIssueCount`, Ersteller, `coverPhotoId` und `photos` (Titelbild zuerst) |
 | `PUT` | `/api/spots/{id}/cover` | Titelbild wählen (`{"photoId": 12}`, `null` = erstes Foto) → Spot 🔒 (Ersteller oder Admin) |
 | `GET` | `/api/ratings/recent?limit=10&withComment=true` | Zuletzt abgegebene Bewertungen über alle Spots mit `spotId`, `spotName`, `city`, `categoryCode` und `coverPhotoUrl` (Startseite) |
 | `POST` | `/api/spots` | Spot anlegen 🔒 |
 | `PUT` | `/api/spots/{id}` | Spot bearbeiten 🔒 (nur Ersteller) |
 | `DELETE` | `/api/spots/{id}` | Spot inkl. Bewertungen/Kommentaren/Fotos löschen 🔒 (Admin; Ersteller nur, solange keine Beiträge anderer existieren, sonst 409) |
 | `GET` | `/api/spots/{id}/ratings` | Bewertungen (`score`, `comment`, `author`, `authorName`), neueste zuerst |
-| `POST` | `/api/spots/{id}/ratings` | Bewerten (`score` 1–5, optional `comment`), erneutes Bewerten überschreibt → Spot 🔒 |
+| `POST` | `/api/spots/{id}/ratings` | Bewerten (`score` 1–5, optional `comment`, Teilnoten `sausageScore`/`bunScore`/`mustardScore`/`valueScore` 1–5 und `priceCents` 50–3000), erneutes Bewerten überschreibt → Spot 🔒 |
 | `PUT` | `/api/spots/{id}/ratings/{ratingId}` | Eigene Bewertung ändern → Spot 🔒 |
 | `DELETE` | `/api/spots/{id}/ratings/{ratingId}` | Bewertung löschen (Verfasser oder Admin) → Spot 🔒 |
 | `GET` | `/api/spots/{id}/ratings/me` | Eigene Bewertung 🔒 |
@@ -124,6 +127,19 @@ curl -s -d client_id=sausage-cli -d scope=openid http://localhost:8180/realms/sa
 | `GET` | `/api/spots/{id}/photos/{photoId}` | Das Bild selbst |
 | `POST` | `/api/spots/{id}/photos` | Foto hochladen (multipart, Feld `file`, JPEG/PNG/WebP, max. 10 MB, 40 Megapixel und 20 je Spot; EXIF/GPS-Metadaten und angehängte Daten werden entfernt; Tageskontingent 50 MB je Nutzer, `PHOTO_DAILY_QUOTA_BYTES`, sonst 429; Admins ausgenommen) 🔒 |
 | `DELETE` | `/api/spots/{id}/photos/{photoId}` | Foto löschen 🔒 (Hochladender, Ersteller des Spots oder Admin) |
+| `POST` | `/api/spots/{id}/issues` | „Stimmt was nicht?“ `{"type": CLOSED\|WRONG_LOCATION\|WRONG_HOURS\|WRONG_DETAILS\|OTHER, "message"}` → 201; höchstens 3 offene je Nutzer und Spot (sonst 429) 🔒 |
+| `GET` | `/api/admin/issues?status=OPEN\|RESOLVED\|REJECTED\|ALL` | Hinweise, älteste zuerst, mit Spot und `openForSpot` 🔒 (nur Admin) |
+| `PUT` | `/api/admin/issues/{id}` | `{"status": RESOLVED\|REJECTED, "allForSpot": true}` → 204 🔒 (nur Admin) |
+| `POST` | `/api/spots/{id}/checkins` | Wurst-Tagebuch „Hier gegessen“ → 201; einmal pro Spot und Tag (sonst 409) 🔒 |
+| `GET` | `/api/spots/{id}/checkins/me` | Eigene Besuche `{count, lastEatenOn}` 🔒 |
+| `GET` / `DELETE` | `/api/users/me/checkins` / `…/{id}` | Eigene Einträge mit Spot, neueste zuerst / Eintrag löschen 🔒 |
+| `GET` | `/api/users/me/stats` | Kennzahlen, Stammbude und Abzeichen (berechnet, nicht gespeichert) 🔒 |
+| `GET` / `POST` | `/api/users/me/lists` | Eigene Listen (`?spotId=` setzt `containsSpot`) / anlegen `{title, description, isPublic}`, max. 50 🔒 |
+| `GET` | `/api/lists/{id}` | Liste mit Spots – öffentlich für alle, privat nur für den Besitzer (sonst 404) |
+| `PUT` / `DELETE` | `/api/lists/{id}` | Liste ändern / löschen 🔒 (Besitzer) |
+| `PUT` / `DELETE` | `/api/lists/{id}/spots/{spotId}` | Spot hinzufügen (max. 200) / entfernen 🔒 (Besitzer) |
+| `PUT` | `/api/users/me/devices` | Push-Token anmelden `{token, platform: ANDROID\|IOS}` (ein Token gehört immer dem zuletzt angemeldeten Konto) 🔒 |
+| `POST` | `/api/users/me/devices/remove` | Push-Token abmelden `{token}` 🔒 |
 | `GET` | `/api/spots/{id}/comments` | Kommentare (neueste zuerst, mit Benutzername) |
 | `POST` | `/api/spots/{id}/comments` | Kommentieren 🔒 |
 | `DELETE` | `/api/spots/{id}/comments/{commentId}` | Kommentar löschen 🔒 (Autor oder Admin) |

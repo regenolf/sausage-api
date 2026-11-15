@@ -40,6 +40,18 @@ class SpotRepository {
 
 	private static final String SPOT_GROUP_BY = "GROUP BY s.id, c.code, u.username\n";
 
+	/** Nur für die Detailseite: Teilnoten, typischer Preis (Median der letzten zwei Jahre) und offene Hinweise. */
+	private static final String DETAIL_SELECT = SPOT_SELECT.replace("COUNT(r.id) AS rating_count", """
+			COUNT(r.id) AS rating_count,
+			       AVG(r.sausage_score)::float8 AS avg_sausage, AVG(r.bun_score)::float8 AS avg_bun,
+			       AVG(r.mustard_score)::float8 AS avg_mustard, AVG(r.value_score)::float8 AS avg_value,
+			       COUNT(r.id) FILTER (WHERE r.sausage_score IS NOT NULL OR r.bun_score IS NOT NULL
+			                           OR r.mustard_score IS NOT NULL OR r.value_score IS NOT NULL) AS sub_score_count,
+			       ROUND(percentile_cont(0.5) WITHIN GROUP (ORDER BY r.price_cents)
+			             FILTER (WHERE r.created_at > CURRENT_TIMESTAMP - INTERVAL '2 years'))::integer AS price_cents,
+			       COUNT(r.price_cents) FILTER (WHERE r.created_at > CURRENT_TIMESTAMP - INTERVAL '2 years') AS price_count,
+			       (SELECT COUNT(*) FROM spot_issue i WHERE i.spot_id = s.id AND i.status = 'OPEN') AS open_issue_count""");
+
 	/**
 	 * Für Listen: SPOT_SELECT plus Vorschaubild – das gewählte Titelbild, sonst das erste Foto (jeweils ohne Fotos
 	 * von Nutzern, die :viewerId blockiert hat). Der LATERAL-Join liefert höchstens eine Zeile je Spot und
@@ -68,13 +80,13 @@ class SpotRepository {
 			rs.getString("category_code"), rs.getString("name"), rs.getString("city"),
 			rs.getBigDecimal("latitude"), rs.getBigDecimal("longitude"),
 			averageRating(rs), rs.getLong("rating_count"), coverPhotoUrl(rs),
-			rs.getString("source"), rs.getBoolean("verified"));
+			rs.getString("source"), rs.getBoolean("verified"), rs.getString("opening_hours"));
 
 	private final RowMapper<NearbySpot> nearbySpot = (rs, n) -> new NearbySpot(rs.getLong("id"),
 			rs.getString("category_code"), rs.getString("name"), rs.getString("city"),
 			rs.getBigDecimal("latitude"), rs.getBigDecimal("longitude"),
 			averageRating(rs), rs.getLong("rating_count"), rs.getDouble("distance_km"), coverPhotoUrl(rs),
-			rs.getString("source"), rs.getBoolean("verified"));
+			rs.getString("source"), rs.getBoolean("verified"), rs.getString("opening_hours"));
 
 	private static final RowMapper<SpotDetail> SPOT_DETAIL = (rs, n) -> new SpotDetail(rs.getLong("id"),
 			rs.getString("category_code"), rs.getString("name"), rs.getString("description"),
@@ -89,6 +101,9 @@ class SpotRepository {
 			rs.getString("source"), rs.getBoolean("verified"),
 			SpotDtos.sourceUrl(rs.getString("source"), rs.getString("external_id")),
 			nullableLong(rs, "chosen_cover_id"),
+			new SpotDtos.SubScores(nullableDouble(rs, "avg_sausage"), nullableDouble(rs, "avg_bun"),
+					nullableDouble(rs, "avg_mustard"), nullableDouble(rs, "avg_value"), rs.getLong("sub_score_count")),
+			nullableInt(rs, "price_cents"), rs.getLong("price_count"), rs.getLong("open_issue_count"),
 			List.of());
 
 	private final JdbcClient jdbc;
@@ -175,6 +190,25 @@ class SpotRepository {
 				.param("viewerId", viewerId)
 				.query(spotSummary)
 				.list();
+	}
+
+	/**
+	 * Buden zu den IDs (z. B. für Tagebuch und Listen), als Map nach ID – die Reihenfolge bestimmt der Aufrufer.
+	 * Nicht (mehr) vorhandene IDs fehlen in der Map.
+	 */
+	Map<Long, SpotSummary> findSummaries(java.util.Collection<Long> ids, long viewerId) {
+		if (ids.isEmpty()) {
+			return Map.of();
+		}
+		String sql = LIST_SELECT + "WHERE s.id IN (:ids)\n" + LIST_GROUP_BY;
+		Map<Long, SpotSummary> result = new java.util.LinkedHashMap<>();
+		jdbc.sql(sql)
+				.param("ids", List.copyOf(new java.util.LinkedHashSet<>(ids)))
+				.param("viewerId", viewerId)
+				.query(spotSummary)
+				.list()
+				.forEach(spot -> result.put(spot.id(), spot));
+		return result;
 	}
 
 	List<SpotSummary> findSpotsByCreator(long userId) {
@@ -353,7 +387,7 @@ class SpotRepository {
 	}
 
 	Optional<SpotDetail> findSpot(long id) {
-		String sql = SPOT_SELECT + "WHERE s.id = :id\n" + SPOT_GROUP_BY;
+		String sql = DETAIL_SELECT + "WHERE s.id = :id\n" + SPOT_GROUP_BY;
 		return jdbc.sql(sql)
 				.param("id", id)
 				.query(SPOT_DETAIL)
@@ -481,26 +515,43 @@ class SpotRepository {
 
 	private static final RowMapper<Rating> RATING = (rs, n) -> new Rating(rs.getLong("id"), rs.getInt("score"),
 			rs.getString("comment"), rs.getString("username"), rs.getString("username"),
-			rs.getTimestamp("created_at").toInstant());
+			rs.getTimestamp("created_at").toInstant(), nullableInt(rs, "sausage_score"), nullableInt(rs, "bun_score"),
+			nullableInt(rs, "mustard_score"), nullableInt(rs, "value_score"), nullableInt(rs, "price_cents"));
 
 	private static final String RATING_SELECT = """
-			SELECT r.id, r.score, r.comment, u.username, r.created_at
+			SELECT r.id, r.score, r.comment, u.username, r.created_at,
+			       r.sausage_score, r.bun_score, r.mustard_score, r.value_score, r.price_cents
 			FROM rating r
 			JOIN app_user u ON u.id = r.user_id
 			""";
 
-	void upsertRating(long spotId, long userId, int score, String comment) {
+	void upsertRating(long spotId, long userId, SpotDtos.RatingRequest r, String comment) {
 		jdbc.sql("""
-				INSERT INTO rating (spot_id, user_id, score, comment)
-				VALUES (:spotId, :userId, :score, :comment)
+				INSERT INTO rating (spot_id, user_id, score, comment, sausage_score, bun_score, mustard_score,
+				                    value_score, price_cents)
+				VALUES (:spotId, :userId, :score, :comment, :sausage, :bun, :mustard, :value, :price)
 				ON CONFLICT (spot_id, user_id)
-				DO UPDATE SET score = EXCLUDED.score, comment = EXCLUDED.comment, created_at = CURRENT_TIMESTAMP
+				DO UPDATE SET score = EXCLUDED.score, comment = EXCLUDED.comment,
+				              sausage_score = EXCLUDED.sausage_score, bun_score = EXCLUDED.bun_score,
+				              mustard_score = EXCLUDED.mustard_score, value_score = EXCLUDED.value_score,
+				              price_cents = EXCLUDED.price_cents, created_at = CURRENT_TIMESTAMP
 				""")
 				.param("spotId", spotId)
 				.param("userId", userId)
-				.param("score", score)
-				.param("comment", comment)
+				.params(ratingParams(r, comment))
 				.update();
+	}
+
+	private static Map<String, Object> ratingParams(SpotDtos.RatingRequest r, String comment) {
+		Map<String, Object> params = new HashMap<>();
+		params.put("score", r.score());
+		params.put("comment", comment);
+		params.put("sausage", r.sausageScore());
+		params.put("bun", r.bunScore());
+		params.put("mustard", r.mustardScore());
+		params.put("value", r.valueScore());
+		params.put("price", r.priceCents());
+		return params;
 	}
 
 	/** Bewertungen eines Spots ohne die von Nutzern, die {@code viewerId} blockiert hat (-1 = anonym). */
@@ -530,10 +581,14 @@ class SpotRepository {
 				.optional();
 	}
 
-	void updateRating(long ratingId, int score, String comment) {
-		jdbc.sql("UPDATE rating SET score = :score, comment = :comment, created_at = CURRENT_TIMESTAMP WHERE id = :id")
-				.param("score", score)
-				.param("comment", comment)
+	void updateRating(long ratingId, SpotDtos.RatingRequest r, String comment) {
+		jdbc.sql("""
+				UPDATE rating SET score = :score, comment = :comment, sausage_score = :sausage, bun_score = :bun,
+				                  mustard_score = :mustard, value_score = :value, price_cents = :price,
+				                  created_at = CURRENT_TIMESTAMP
+				WHERE id = :id
+				""")
+				.params(ratingParams(r, comment))
 				.param("id", ratingId)
 				.update();
 	}
@@ -619,6 +674,16 @@ class SpotRepository {
 
 	private static Long nullableLong(ResultSet rs, String column) throws SQLException {
 		long value = rs.getLong(column);
+		return rs.wasNull() ? null : value;
+	}
+
+	private static Integer nullableInt(ResultSet rs, String column) throws SQLException {
+		int value = rs.getInt(column);
+		return rs.wasNull() ? null : value;
+	}
+
+	private static Double nullableDouble(ResultSet rs, String column) throws SQLException {
+		double value = rs.getDouble(column);
 		return rs.wasNull() ? null : value;
 	}
 

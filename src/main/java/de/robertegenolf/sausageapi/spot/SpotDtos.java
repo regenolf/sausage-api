@@ -32,10 +32,12 @@ public final class SpotDtos {
 	 * {@code coverPhotoUrl}: erstes Foto (ohne Fotos blockierter Nutzer) als Vorschaubild, null ohne Fotos.
 	 * {@code source}: USER (in der App angelegt) oder Importquelle wie OSM (dann Quellenangabe anzeigen);
 	 * {@code verified}: false bei importierten Spots, die die Moderation noch nicht geprüft hat.
+	 * {@code openingHours}: Öffnungszeiten im OpenStreetMap-Format (z. B. „Mo-Fr 10:00-18:00“) oder Freitext – die
+	 * App wertet sie für „Jetzt geöffnet“ aus.
 	 */
 	public record SpotSummary(long id, String categoryCode, String name, String city,
 			BigDecimal latitude, BigDecimal longitude, Double averageRating, long ratingCount, String coverPhotoUrl,
-			String source, boolean verified) {
+			String source, boolean verified, String openingHours) {
 	}
 
 	/**
@@ -51,28 +53,35 @@ public final class SpotDtos {
 
 	public record NearbySpot(long id, String categoryCode, String name, String city,
 			BigDecimal latitude, BigDecimal longitude, Double averageRating, long ratingCount,
-			double distanceKm, String coverPhotoUrl, String source, boolean verified) {
+			double distanceKm, String coverPhotoUrl, String source, boolean verified, String openingHours) {
 	}
 
 	/**
 	 * {@code source}/{@code verified} wie bei {@link SpotSummary}; {@code sourceUrl} verweist bei importierten Spots
 	 * auf den Eintrag in der Quelle (z. B. https://www.openstreetmap.org/node/123), sonst null.
 	 * {@code coverPhotoId}: vom Ersteller bzw. der Moderation gewähltes Titelbild, null = erstes Foto. {@code photos}
-	 * beginnt immer mit dem Titelbild.
+	 * beginnt immer mit dem Titelbild. {@code subScores}: Schnitt der optionalen Teilnoten; {@code priceCents}: typischer
+	 * Preis einer Bratwurst (Median der Preisangaben aus Bewertungen der letzten zwei Jahre), null ohne Angaben;
+	 * {@code priceCount}: Anzahl dieser Angaben. {@code openIssueCount}: offene „Stimmt was nicht?“-Hinweise.
 	 */
 	public record SpotDetail(long id, String categoryCode, String name, String description,
 			String street, String houseNumber, String zipCode, String city,
 			BigDecimal latitude, BigDecimal longitude, String openingHours,
 			Double averageRating, long ratingCount, long recommendCount, String createdBy, Instant createdAt,
 			Instant updatedAt, String source, boolean verified, String sourceUrl, Long coverPhotoId,
+			SubScores subScores, Integer priceCents, long priceCount, long openIssueCount,
 			List<SpotPhoto> photos) {
 
 		SpotDetail withPhotos(List<SpotPhoto> photos) {
 			return new SpotDetail(id, categoryCode, name, description, street, houseNumber, zipCode, city,
 					latitude, longitude, openingHours, averageRating, ratingCount, recommendCount, createdBy, createdAt,
-					updatedAt,
-					source, verified, sourceUrl, coverPhotoId, photos);
+					updatedAt, source, verified, sourceUrl, coverPhotoId, subScores, priceCents, priceCount,
+					openIssueCount, photos);
 		}
+	}
+
+	/** Schnitt der Teilnoten (je 1–5, null ohne Angaben) und wie viele Bewertungen welche enthalten. */
+	public record SubScores(Double sausage, Double bun, Double mustard, Double value, long count) {
 	}
 
 	/** Link auf den Eintrag in der Importquelle, null für in der App angelegte Spots. */
@@ -99,8 +108,12 @@ public final class SpotDtos {
 			long spotId, String spotName, String city, String categoryCode, String coverPhotoUrl) {
 	}
 
-	/** Bewertung eines Users: Sterne plus optionaler Kommentar. {@code author} ist der Benutzername (= JWT-sub). */
-	public record Rating(long id, int score, String comment, String author, String authorName, Instant createdAt) {
+	/**
+	 * Bewertung eines Users: Sterne plus optionaler Kommentar, Teilnoten und Preis. {@code author} ist der
+	 * Benutzername (= JWT-sub).
+	 */
+	public record Rating(long id, int score, String comment, String author, String authorName, Instant createdAt,
+			Integer sausageScore, Integer bunScore, Integer mustardScore, Integer valueScore, Integer priceCents) {
 	}
 
 	/**
@@ -119,9 +132,19 @@ public final class SpotDtos {
 			@Size(max = 500) String openingHours) {
 	}
 
+	/** Gesamtsterne Pflicht; Teilnoten (1–5) und Preis einer Bratwurst in Cent (0,50–30,00 €) optional. */
 	public record RatingRequest(
 			@NotNull @Min(1) @Max(5) Integer score,
-			@Size(max = 2000) String comment) {
+			@Size(max = 2000) String comment,
+			@Min(1) @Max(5) Integer sausageScore,
+			@Min(1) @Max(5) Integer bunScore,
+			@Min(1) @Max(5) Integer mustardScore,
+			@Min(1) @Max(5) Integer valueScore,
+			@Min(50) @Max(3000) Integer priceCents) {
+
+		public RatingRequest(Integer score, String comment) {
+			this(score, comment, null, null, null, null, null);
+		}
 	}
 
 	public record CommentRequest(

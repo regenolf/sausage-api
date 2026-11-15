@@ -18,6 +18,7 @@ import jakarta.validation.constraints.Max;
 import jakarta.validation.constraints.Min;
 import jakarta.validation.constraints.NotNull;
 import jakarta.validation.constraints.Size;
+import org.springframework.context.ApplicationEventPublisher;
 import org.springframework.dao.DuplicateKeyException;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
@@ -45,11 +46,14 @@ class SpotController {
 	private final SpotRepository repository;
 	private final PhotoRepository photos;
 	private final UserRepository users;
+	private final ApplicationEventPublisher events;
 
-	SpotController(SpotRepository repository, PhotoRepository photos, UserRepository users) {
+	SpotController(SpotRepository repository, PhotoRepository photos, UserRepository users,
+			ApplicationEventPublisher events) {
 		this.repository = repository;
 		this.photos = photos;
 		this.users = users;
+		this.events = events;
 	}
 
 	@GetMapping("/categories")
@@ -238,8 +242,15 @@ class SpotController {
 	@PostMapping("/spots/{id}/ratings")
 	SpotDetail rate(@PathVariable long id, @Valid @RequestBody RatingRequest request, Authentication auth) {
 		requireSpot(id);
-		repository.upsertRating(id, currentUserId(auth), request.score(), blankToNull(request.comment()));
-		return detail(id, auth);
+		long userId = currentUserId(auth);
+		boolean isNew = repository.findRating(id, userId).isEmpty();
+		repository.upsertRating(id, userId, request, blankToNull(request.comment()));
+		SpotDetail spot = detail(id, auth);
+		if (isNew) {
+			Long ownerId = repository.findSpotOwner(id).filter(owner -> owner != SpotRepository.NO_OWNER).orElse(null);
+			events.publishEvent(new SpotRated(id, spot.name(), ownerId, userId, auth.getName(), request.score()));
+		}
+		return spot;
 	}
 
 	@GetMapping("/spots/{id}/ratings")
@@ -270,7 +281,7 @@ class SpotController {
 		if (requireRatingAuthor(id, ratingId) != currentUserId(auth)) {
 			throw new ResponseStatusException(HttpStatus.FORBIDDEN, "Nur eigene Bewertungen dürfen geändert werden");
 		}
-		repository.updateRating(ratingId, request.score(), blankToNull(request.comment()));
+		repository.updateRating(ratingId, request, blankToNull(request.comment()));
 		return detail(id, auth);
 	}
 
